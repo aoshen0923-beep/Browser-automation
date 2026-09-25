@@ -47,8 +47,9 @@ Each teammate runs quizpilot on their own Windows PC with their own Chrome
 logins. The whole team shares one knowledge base.
 
 **Install for teammates, no Python needed.** Every push builds
-`quizpilot-windows.zip` on GitHub (Actions → windows-build → Artifacts;
-tagged versions such as `v0.2.0` also appear under Releases). To use it:
+`quizpilot-windows.zip` on GitHub (Actions → windows-build → Artifacts). To
+publish a release with a permanent link: Actions → windows-build → Run
+workflow → enter a new version such as `v0.1.1`. To use it:
 
 1. Unzip it anywhere.
 2. Double-click `quizpilot-shell.bat`. This opens a terminal where

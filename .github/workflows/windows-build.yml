@@ -1,13 +1,19 @@
 name: windows-build
 
 # Builds quizpilot-windows.zip (no Python needed) for teammates.
-# Download it from the run's "Artifacts" section, or from a release when
-# a tag like v0.2.0 is pushed.
+# Every push uploads it under the run's "Artifacts". To publish a release:
+# Actions -> windows-build -> Run workflow -> enter a new version (v0.1.1).
+# The workflow creates the release itself as a draft, attaches the zip and
+# then publishes it, which also works with immutable releases.
 on:
   push:
     branches: ["**"]
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "New release version, e.g. v0.1.1 (leave empty to only build)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -65,7 +71,21 @@ jobs:
           retention-days: 30
 
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: quizpilot-windows.zip
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:VERSION -notmatch '^v\d+\.\d+\.\d+$') { throw "version must look like v0.1.1, got '$env:VERSION'" }
+          gh release view $env:VERSION 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "$env:VERSION already exists; pick a new version number" }
+          # Draft first: immutable releases only accept assets before publishing.
+          gh release create $env:VERSION quizpilot-windows.zip --draft --target $env:GITHUB_SHA `
+            --title "quizpilot $env:VERSION" `
+            --notes "Windows build. Download quizpilot-windows.zip, unzip it and double-click quizpilot-shell.bat."
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+          gh release edit $env:VERSION --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw "publishing the release failed" }
+          exit 0
