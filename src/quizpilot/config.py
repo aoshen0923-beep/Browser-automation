@@ -13,7 +13,7 @@ CONFIG_NAME = "quizpilot.toml"
 @dataclass
 class LLMConfig:
     base_url: str = "https://api.deepseek.com"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-flash"
     api_key: str = ""
     timeout: float = 25.0
 

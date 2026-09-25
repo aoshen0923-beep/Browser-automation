@@ -38,8 +38,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 setx DEEPSEEK_API_KEY "sk-..."      # then open a new terminal
 ```
 
-3. Edit `quizpilot.toml` and set `model` to the exact DeepSeek model ID
-   from your console (the V4.1 Flash ID).
+3. `quizpilot.toml` uses `deepseek-flash` by default. Model names are
+   lowercase; the API's error message lists the valid ones if a name is wrong.
 
 ## Team setup (3 people)
 

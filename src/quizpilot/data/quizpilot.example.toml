@@ -4,9 +4,9 @@
 
 [llm]
 base_url = "https://api.deepseek.com"
-# Put the exact model ID from your DeepSeek console here
-# (e.g. the ID for DeepSeek V4.1 Flash).
-model = "deepseek-chat"
+# Exact, lowercase model name. deepseek-flash is fastest (best for the
+# 30-second individual round); deepseek-v4-pro is the larger model.
+model = "deepseek-flash"
 api_key = ""
 timeout = 25
 
