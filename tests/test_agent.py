@@ -71,6 +71,13 @@ def std_site(tmp_path):
         f'<meta charset="utf-8"><nav>{nav}</nav><main><a href="std.pdf">GB/T 38880-2020 全文</a></main>',
         encoding="utf-8",
     )
+    # An icon-only button (no text) that only vision can find, at a known spot.
+    (tmp_path / "icon.html").write_text(
+        '<meta charset="utf-8"><title>图标</title><div id="out">点击放大镜查看</div>'
+        '<div id="lens" onclick="document.getElementById(\'out\').innerText=\'本标准主要起草人：高尚荣、李桂梅、李建全\'"'
+        ' style="position:absolute;left:100px;top:200px;width:40px;height:40px;background:#333;border-radius:20px"></div>',
+        encoding="utf-8",
+    )
     # A verification page that "gets solved" 1.5 s after loading.
     (tmp_path / "captcha.html").write_text(
         '<meta charset="utf-8"><title>安全验证</title><body>请完成安全验证</body>'
@@ -291,3 +298,63 @@ def test_content_links_survive_busy_navigation(std_site, chrome):  # noqa: F811
             return await agent.run(parse_question(QUESTION, "single"), budget=60, close=True)
 
     assert asyncio.run(run()).answer.answer == "C"
+
+
+def test_vision_finds_an_icon_button_and_reads_pdf_pages(std_site, chrome):  # noqa: F811
+    images_seen = []
+
+    class Seer:
+        def chat_json(self, system, user, max_tokens=700, images=None):
+            if images:
+                images_seen.append(images[0][:4])
+                if "有几张图" in user:
+                    return {"answer": "0张图"}
+                return {"answer": "左上方有一个圆形放大镜图标", "x": 120, "y": 220}
+            if "主要起草人" in user and "0张图" in user:
+                return {"actions": [{"action": "answer", "answer": "C", "confidence": 0.9}]}
+            if "主要起草人" in user:
+                return {"actions": [{"action": "pdf", "url": std_site + "/std.pdf", "page": 2, "look": "这一页有几张图"}]}
+            if "x=120, y=220" in user:
+                return {"actions": [{"action": "click_xy", "x": 120, "y": 220}]}
+            if "空白页" in user:
+                return {"actions": [{"action": "goto", "url": std_site + "/icon.html"}]}
+            return {"actions": [{"action": "look", "question": "放大镜图标在哪里"}]}
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, Seer(), [], None, log=lambda *_: None)
+            return await agent.run(parse_question(QUESTION, "single"), budget=60, close=True)
+
+    result = asyncio.run(run())
+    kinds = [s.action["action"] for s in result.steps]
+    assert result.answer.answer == "C", [(s.action, s.result[:80]) for s in result.steps]
+    assert kinds == ["goto", "look", "click_xy", "pdf"], kinds
+    assert images_seen[0] == b"\xff\xd8\xff\xe0" or images_seen[0][:2] == b"\xff\xd8"  # JPEG screenshot
+    assert images_seen[1] == b"\x89PNG"  # rendered PDF page
+
+
+def test_vision_switches_off_when_the_model_rejects_images(std_site, chrome):  # noqa: F811
+    from quizpilot.llm import VisionUnsupported
+
+    class TextOnly:
+        def chat_json(self, system, user, max_tokens=700, images=None):
+            if images:
+                raise VisionUnsupported("unknown variant image_url")
+            if "视觉不可用" in user:
+                return {"actions": [{"action": "answer", "answer": "C", "confidence": 0.4}]}
+            if "空白页" in user:
+                return {"actions": [{"action": "goto", "url": std_site + "/icon.html"}]}
+            return {"actions": [{"action": "look", "question": "图标在哪"}]}
+
+    model = TextOnly()
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, model, [], None, log=lambda *_: None)
+            result = await agent.run(parse_question(QUESTION, "single"), budget=60, close=True)
+            second = Agent(browser, model, [], None, log=lambda *_: None)
+            return result, second.vision
+
+    result, second_vision = asyncio.run(run())
+    assert result.answer.answer == "C"
+    assert model.vision_unsupported is True and second_vision is False

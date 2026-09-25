@@ -15,8 +15,12 @@ class LLMError(RuntimeError):
     pass
 
 
+class VisionUnsupported(LLMError):
+    """The model/API rejected image input."""
+
+
 class ChatModel(Protocol):
-    def chat_json(self, system: str, user: str, max_tokens: int = 700) -> dict: ...
+    def chat_json(self, system: str, user: str, max_tokens: int = 700, images: list[bytes] | None = None) -> dict: ...
 
 
 _PARTIAL_FIELDS = {
@@ -73,13 +77,13 @@ class OpenAICompatible:
             transport=transport,
         )
 
-    def chat_json(self, system: str, user: str, max_tokens: int = 700) -> dict:
+    def chat_json(self, system: str, user: str, max_tokens: int = 700, images: list[bytes] | None = None) -> dict:
         # Reasoning models can spend the whole token budget thinking and
         # return empty content; retry once with a much larger budget.
         budget = max(max_tokens, 1500)
         salvaged: dict | None = None
         for attempt in range(2):
-            content, finish = self._complete(system, user, budget)
+            content, finish = self._complete(system, user, budget, images)
             if content.strip():
                 try:
                     reply = parse_json_reply(content)
@@ -97,12 +101,17 @@ class OpenAICompatible:
             return salvaged
         raise LLMError(f"model returned an empty or cut-off reply (finish_reason={finish})")
 
-    def _complete(self, system: str, user: str, max_tokens: int) -> tuple[str, str]:
+    def _complete(self, system: str, user: str, max_tokens: int, images: list[bytes] | None = None) -> tuple[str, str]:
+        content: object = user
+        if images:
+            content = [{"type": "text", "text": user}] + [
+                {"type": "image_url", "image_url": {"url": _data_uri(img)}} for img in images
+            ]
         body = {
             "model": self.cfg.model,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": content},
             ],
             "temperature": 0,
             "max_tokens": max_tokens,
@@ -113,6 +122,15 @@ class OpenAICompatible:
         except httpx.HTTPError as e:
             raise LLMError(f"request failed: {e}") from e
         if r.status_code != 200:
+            if images and r.status_code in (400, 415, 422):
+                raise VisionUnsupported(f"model rejected image input: HTTP {r.status_code}: {r.text[:200]}")
             raise LLMError(f"HTTP {r.status_code}: {r.text[:300]}")
         choice = r.json()["choices"][0]
         return choice["message"].get("content") or "", str(choice.get("finish_reason"))
+
+
+def _data_uri(img: bytes) -> str:
+    import base64
+
+    mime = "image/png" if img[:4] == b"\x89PNG" else "image/jpeg"
+    return f"data:{mime};base64,{base64.b64encode(img).decode()}"

@@ -85,3 +85,27 @@ def test_cut_off_reply_is_retried_then_salvaged():
     client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
     got = client.chat_json("s", "u")
     assert got["answer"] == "B" and len(calls) == 2 and calls[1] == calls[0] * 3
+
+
+def test_images_are_sent_and_rejection_is_recognized():
+    from quizpilot.llm import VisionUnsupported
+
+    seen = {}
+
+    def handler(request):
+        body = json.loads(request.content)
+        seen["content"] = body["messages"][1]["content"]
+        if body["model"] == "text-only":
+            return httpx.Response(400, text='{"error":{"message":"unknown variant `image_url`"}}')
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"answer": "3张"}'}, "finish_reason": "stop"}]})
+
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 20
+    client = OpenAICompatible(LLMConfig(api_key="k", model="vl"), transport=httpx.MockTransport(handler))
+    assert client.chat_json("s", "这页有几张图", images=[png]) == {"answer": "3张"}
+    assert seen["content"][0] == {"type": "text", "text": "这页有几张图"}
+    assert seen["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+    text_only = OpenAICompatible(LLMConfig(api_key="k", model="text-only"), transport=httpx.MockTransport(handler))
+    with pytest.raises(VisionUnsupported):
+        text_only.chat_json("s", "u", images=[png])
+    assert text_only.chat_json.__name__  # text requests still go through the normal path

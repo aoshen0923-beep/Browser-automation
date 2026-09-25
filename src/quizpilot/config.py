@@ -16,6 +16,7 @@ class LLMConfig:
     model: str = "deepseek-flash"
     api_key: str = ""
     timeout: float = 60.0
+    vision: str = "auto"  # auto: try screenshots, switch off if the API rejects images; on; off
 
 
 @dataclass

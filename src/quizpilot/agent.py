@@ -22,7 +22,7 @@ from playwright.async_api import Page
 from . import pdftools
 from .browser import BLOCKED_RESOURCES, Browser, page_blocked, wait_for_human
 from .kb import KB
-from .llm import ChatModel, LLMError
+from .llm import ChatModel, LLMError, VisionUnsupported
 from .question import JUDGE, MULTI, SINGLE, Question
 from .solver import Answer, normalize_answer
 
@@ -89,6 +89,9 @@ actions 最多3个，按顺序执行；会改变页面的动作（goto/search/cl
 {"action":"find","text":"起草人"}                      在当前页面全文中查找关键词（页面很长时用）
 {"action":"pdf","url":"(可省略=当前页)","page":2,"find":"关键词"}  读取PDF：页数、指定页（负数从末尾算，-2=倒数第二页）、或查找关键词
 {"action":"back"}                                    返回上一页
+{"action":"look","question":"柱状图里排第一的作者是谁？"}  看当前页面截图回答问题（图表、只有图标没有文字的按钮、页面布局）；要点击图标时问它的位置
+{"action":"click_xy","x":420,"y":310}                按截图上的坐标点击（配合 look 找到的位置）
+读PDF时加 "look":"这一页有几张图" 可以直接看那一页的图片
 {"action":"answer","answer":"C","confidence":0.9,"reason":"一句话","evidence":"页面上看到的原文"}
 answer 的依据必须来自页面上看到的内容；没看到的不要编造，用较低的 confidence 表示。"""
 
@@ -162,11 +165,14 @@ class Agent:
         max_text: int = 2500,
         log=print,
         logged_in: list[dict] | None = None,
+        vision: bool = True,
     ):
         self.browser = browser
         self.model = model
         self.kb = kb
         self.sites = sites
+        # A model that rejected images once stays text-only for the session.
+        self.vision = vision and not getattr(model, "vision_unsupported", False)
         self.system = SYSTEM_TEMPLATE.format(actions=ACTIONS, directory=site_directory(sites))
         if logged_in:
             self.system += "\n\n用户已在这个浏览器中登录的网站（需要账号的内容优先用这些，不用再登录）：\n" + "\n".join(
@@ -191,8 +197,11 @@ class Agent:
         return page
 
     async def _prepare(self, page: Page) -> None:
+        # With vision on, images must load or screenshots show empty boxes.
+        blocked = {"media"} if self.vision else BLOCKED_RESOURCES
+
         async def handler(route):
-            if route.request.resource_type in BLOCKED_RESOURCES:
+            if route.request.resource_type in blocked:
                 await route.abort()
             else:
                 await route.continue_()
@@ -344,6 +353,14 @@ class Agent:
             return "已选择"
         if kind == "flow":
             return await self.run_flow(a)
+        if kind == "look":
+            return await self.look(str(a.get("question", "描述这个页面")))
+        if kind == "click_xy":
+            await page.mouse.click(float(a.get("x", 0)), float(a.get("y", 0)))
+            await asyncio.sleep(0.6)
+            await self._follow_new_tab(before)
+            await self._settle()
+            return "已按坐标点击"
         if kind == "find":
             return await self.find_text(str(a.get("text", "")))
         if kind == "pdf":
@@ -353,6 +370,34 @@ class Agent:
             await self._settle()
             return "已返回"
         return f"未知动作：{kind}"
+
+    async def _ask_image(self, image: bytes, question: str, extra: str = "") -> str:
+        """One vision call; turns vision off for the session if unsupported."""
+        if not self.vision:
+            return "视觉不可用（当前模型不支持看图），请用页面文字、find 或 pdf 的文字内容判断"
+        system = "你在看一张网页或PDF页面的截图，回答用户的问题。只输出JSON：" \
+                 '{"answer":"简洁的回答","x":0,"y":0}（x、y 只在问到某个元素的位置时填写，是该元素中心在截图上的像素坐标）'
+        try:
+            reply = await asyncio.to_thread(self.model.chat_json, system, f"{question}\n{extra}", 600, [image])
+        except VisionUnsupported:
+            self.vision = False
+            try:
+                self.model.vision_unsupported = True
+            except Exception:
+                pass
+            self.log("  (this model can't take images - vision switched off)")
+            return "视觉不可用（当前模型不支持看图），请用页面文字、find 或 pdf 的文字内容判断"
+        out = f"看图结果：{reply.get('answer', '')}"
+        if reply.get("x") and reply.get("y"):
+            out += f"（位置 x={reply['x']}, y={reply['y']}，可用 click_xy 点击）"
+        return out
+
+    async def look(self, question: str) -> str:
+        shot = await self.page.screenshot(type="jpeg", quality=60)
+        size = self.page.viewport_size or {}
+        return await self._ask_image(
+            shot, question, f"截图尺寸 {size.get('width', '?')}x{size.get('height', '?')}，坐标原点在左上角。"
+        )
 
     async def run_flow(self, a: dict) -> str:
         from .flows import replay
@@ -414,6 +459,8 @@ class Agent:
             if page_no is not None:
                 n = int(page_no)
                 n = n if n > 0 else total + n + 1
+                if 1 <= n <= total and a.get("look"):
+                    out.append(f"第{n}页 " + await self._ask_image(pdftools.page_png(doc, n), str(a["look"])))
                 if 1 <= n <= total:
                     info = pdftools.page_info(doc[n - 1])
                     out.append(

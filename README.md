@@ -239,6 +239,18 @@ recipes travel to teammates with `kb --export` / `--merge`. Every page and PDF i
 so questions it has researched before answer faster next time. If a site
 shows a CAPTCHA or a login page, it beeps and waits for you.
 
+### Vision
+
+If the model accepts images, the agent can also look at the page: `look`
+answers a question from a screenshot (charts such as CNKI's 可视化分析,
+icon-only buttons, layout), `click_xy` clicks a spot found that way, and a
+PDF page can be looked at ("how many figures on page 50"). Reading the page
+structure stays the default because it is cheaper and exact; vision covers
+what text can't. With `vision = "auto"` (the default, under `[llm]`), the
+first rejected image switches vision off for the session and research goes
+on text-only. Images load normally while vision is on so screenshots
+aren't blank.
+
 ## PDF facts without guessing
 
 ```powershell

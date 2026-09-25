@@ -292,7 +292,7 @@ async def _answer_one(q, kb, model, cfg: Config, args, browser=None) -> None:
     from .agent import Agent
 
     print(f"\nSearching live in Chrome (up to {_budget(args):.0f}s)...")
-    agent = Agent(browser, model, load_sites(), kb)
+    agent = Agent(browser, model, load_sites(), kb, vision=cfg.llm.vision != "off")
     result = await agent.run(q, budget=_budget(args))
     _print_answer(q, result.answer, args.round, urls=result.urls, title="live answer from the web")
 
@@ -437,7 +437,7 @@ def cmd_eval(args, cfg: Config) -> int:
             async with Browser(cfg.browser.cdp_url) as browser:
                 for i, q in enumerate(questions, 1):
                     print(f"--- {i}/{len(questions)} [{q.module}] {q.stem[:50]}", flush=True)
-                    agent = Agent(browser, model, load_sites(), kb)
+                    agent = Agent(browser, model, load_sites(), kb, vision=cfg.llm.vision != "off")
                     result = await agent.run(q, budget=_budget(args), close=True)
                     record(i, q, result.answer)
 

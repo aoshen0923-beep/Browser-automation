@@ -87,3 +87,8 @@ def render_page(doc: pymupdf.Document, number: int, out: Path, zoom: float = 2.0
     out.parent.mkdir(parents=True, exist_ok=True)
     pix.save(str(out))
     return out
+
+
+def page_png(doc: pymupdf.Document, number: int, zoom: float = 1.5) -> bytes:
+    """A 1-based page as PNG bytes (for a vision model)."""
+    return doc[number - 1].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png")

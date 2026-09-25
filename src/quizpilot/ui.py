@@ -134,7 +134,8 @@ class App:
         except Exception as e:
             job.log.append(f"Chrome 未连接：{e}")
             return
-        agent = Agent(browser, self.model, self.sites, self.kb, log=job.log.append, logged_in=self.logins.logged_in_sites())
+        agent = Agent(browser, self.model, self.sites, self.kb, log=job.log.append, logged_in=self.logins.logged_in_sites(),
+                      vision=self.cfg.llm.vision != "off")
         result = await agent.run(job.q, budget=job.budget)
         job.final = answer_dict(job.q, result.answer, job.round, result.urls)
 

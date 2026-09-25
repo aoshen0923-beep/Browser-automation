@@ -9,6 +9,9 @@ base_url = "https://api.deepseek.com"
 model = "deepseek-flash"
 api_key = ""
 timeout = 60
+# Let the model look at screenshots (charts, icon-only buttons, PDF figures).
+# "auto" tries it and switches off by itself if the model can't take images.
+vision = "auto"
 
 [browser]
 # Chrome/Edge started by `quizpilot chrome` listens here.
