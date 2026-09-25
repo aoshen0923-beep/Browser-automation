@@ -1,0 +1,38 @@
+<!doctype html><meta charset="utf-8"><title>高级检索-模拟知网</title>
+<style>
+  .sort { display:inline-block; position:relative; border:1px solid #ccc; padding:4px 8px; cursor:pointer; }
+  .sort-list { position:absolute; top:28px; left:0; background:#fff; border:1px solid #ccc; margin:0; padding:0; list-style:none; }
+  .sort-list li { padding:4px 12px; } .hidden { display:none; }
+</style>
+<nav><a href="#">首页</a> <a href="#">期刊</a> <a href="#">博硕</a> <a href="#">会议</a> <a href="#">报纸</a></nav>
+<div class="search-row">
+  <div class="sort" id="fieldbox"><span class="sort-default" id="fieldbtn">主题</span>
+    <ul class="sort-list hidden" id="fieldlist"><li data-v="SU">主题</li><li data-v="TI">篇名</li><li data-v="AU">作者</li><li data-v="AF">第一单位</li></ul>
+  </div>
+  <input type="text" class="input-box" id="txt_1_value1" placeholder="中文文献、外文文献">
+</div>
+<div>时间范围：<select id="y1"></select> 至 <select id="y2"></select></div>
+<div>来源类别：<label><input type="checkbox" id="SCI">SCI</label> <label><input type="checkbox" id="CSSCI">CSSCI</label>
+  <label><input type="checkbox" id="PKU">北大核心</label></div>
+<input type="button" class="btn-search" value="检索">
+<div id="results"></div>
+<div id="export" class="hidden"><span id="exp" style="cursor:pointer">导出与分析 ▼</span>
+  <ul id="expmenu" class="hidden sort-list" style="position:static"><li><a href="javascript:void(0)">已选结果分析</a></li><li><a href="javascript:void(0)" id="allres">全部检索结果分析</a></li></ul>
+</div>
+<script>
+  for (const id of ["y1", "y2"]) for (let y = 2000; y <= 2025; y++) document.getElementById(id).add(new Option(y));
+  document.getElementById("y2").value = "2025";
+  let field = "主题";
+  fieldbtn.onclick = () => fieldlist.classList.toggle("hidden");
+  for (const li of fieldlist.children) li.onclick = (e) => { e.stopPropagation(); field = li.innerText; fieldbtn.innerText = field; fieldlist.classList.add("hidden"); };
+  const q = () => new URLSearchParams({field, kw: txt_1_value1.value, y1: y1.value, y2: y2.value, cssci: CSSCI.checked ? 1 : 0});
+  document.querySelector(".btn-search").onclick = () => {
+    results.innerText = "检索中…";
+    setTimeout(() => {   // results arrive by script, not by navigation
+      results.innerText = `共找到 128 条结果（${field}=${txt_1_value1.value}，${y1.value}-${y2.value}${CSSCI.checked ? "，CSSCI" : ""}）`;
+      document.getElementById("export").classList.remove("hidden");
+    }, 900);
+  };
+  exp.onclick = () => expmenu.classList.toggle("hidden");
+  allres.onclick = () => window.open("visual.html?" + q().toString(), "_blank");
+</script>

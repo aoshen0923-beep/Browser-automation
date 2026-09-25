@@ -119,3 +119,58 @@ def test_flows_travel_with_kb_export(tmp_path):
         assert b.find_flows("小米公司的专利申请人检索")[0].name == "专利检索"
         b.delete_flow("专利检索")
         assert b.flows() == [] and b.find_flows("专利") == []
+
+
+@pytest.fixture
+def cnki_like():
+    import pathlib
+
+    root = pathlib.Path(__file__).parent / "sites" / "cnki"
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    handler.log_message = lambda *a: None
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+async def record_cnki(browser, base):
+    """The sample question's operation, done like a person on a CNKI-like page."""
+    rec = Recorder(browser.context)
+    page = await rec.start(base + "/adv.html")
+    await page.click("#fieldbtn")                     # custom dropdown, not a <select>
+    await page.click("#fieldlist >> text=第一单位")
+    await page.fill("#txt_1_value1", "四川师范大学")
+    await page.select_option("#y1", "2011")
+    await page.select_option("#y2", "2020")
+    await page.check("#CSSCI")
+    await page.click("input[value=检索]")             # <input type=button>, no inner text
+    await page.wait_for_selector("#export:not(.hidden)")  # results arrive later, no navigation
+    await page.click("#exp")
+    async with browser.context.expect_page() as new:
+        await page.click("#allres")                   # opens the analysis in a new window
+    viz = await new.value
+    await viz.wait_for_selector("#tabs:not(.hidden)")
+    await viz.click("#t2")                            # 作者 tab
+    await asyncio.sleep(0.8)
+    return build_flow("知网-高级检索-作者分布", "按字段、检索词、年份、CSSCI检索，看作者分布", rec.start_url, rec.stop())
+
+
+def test_realistic_cnki_flow_replays_with_other_choices(cnki_like, chrome):  # noqa: F811
+    async def run():
+        async with Browser(chrome) as browser:
+            flow = await record_cnki(browser, cnki_like)
+            page = await browser.context.new_page()
+            params = {p["name"]: p["example"] for p in flow.params}
+            field_param = next(p["name"] for p in flow.params if p["example"] == "第一单位")
+            kw_param = next(p["name"] for p in flow.params if p["example"] == "四川师范大学")
+            params.update({field_param: "作者", kw_param: "张三"})
+            end = await replay(browser.context, page, flow, params, log=lambda *_: None)
+            return flow, await end.evaluate("document.body.innerText")
+
+    flow, text = asyncio.run(run())
+    kinds = [s["kind"] for s in flow.steps]
+    assert kinds == ["click", "choose", "fill", "select", "select", "check", "click", "click", "choose", "click"], kinds
+    examples = {p["example"] for p in flow.params}
+    assert {"第一单位", "四川师范大学", "2011", "2020"} <= examples, flow.params
+    assert "作者分布（作者=张三，2011-2020，CSSCI）" in text, text

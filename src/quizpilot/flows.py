@@ -45,18 +45,32 @@ RECORDER_JS = r"""
     }
     return parts.join(' > ');
   };
+  // A form field's caption: <label>, aria-label, then the text right before it
+  // ("时间范围：" <select>). Never a neighbour's content.
+  const shortText = (s) => { s = clean(s).replace(/[：:]$/, ''); return s.length <= 12 ? s : ''; };
+  const textBefore = (el) => {
+    let n = el.previousSibling;
+    while (n && n.nodeType === 3 && !n.textContent.trim()) n = n.previousSibling;
+    if (n && n.nodeType === 3) return shortText(n.textContent);
+    if (n && n.nodeType === 1 && ['LABEL', 'SPAN', 'B', 'STRONG', 'TH', 'DT'].includes(n.tagName)) return shortText(n.innerText);
+    return '';
+  };
   const labelOf = (el) => {
+    if (!el.matches('input,select,textarea')) return '';
     if (el.id) {
       const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-      if (l) return clean(l.innerText);
+      if (l) return shortText(l.innerText);
     }
     const wrap = el.closest('label');
-    if (wrap) return clean(wrap.innerText);
-    let prev = el.previousElementSibling;
-    if (prev && clean(prev.innerText)) return clean(prev.innerText);
-    const cell = el.closest('td,dd,li,div');
-    if (cell && cell.previousElementSibling) return clean(cell.previousElementSibling.innerText);
-    return '';
+    if (wrap) return shortText(wrap.innerText);
+    if (el.getAttribute('aria-label')) return shortText(el.getAttribute('aria-label'));
+    let before = textBefore(el);
+    if (before.length <= 1) {  // "至" between two year boxes: add the row's caption
+      const first = el.parentElement && [...el.parentElement.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+      const lead = first ? shortText(first.textContent) : '';
+      if (lead && lead !== before) before = (lead + (before ? ' ' + before : '')).trim();
+    }
+    return before;
   };
   const describe = (el) => ({
     tag: el.tagName.toLowerCase(),
@@ -67,13 +81,29 @@ RECORDER_JS = r"""
     title: el.getAttribute('title') || '',
     role: el.getAttribute('role') || '',
     type: (el.type || '').toLowerCase(),
-    text: ['input', 'textarea', 'select'].includes(el.tagName.toLowerCase()) ? '' : clean(el.innerText || el.value),
+    text: el.matches('input[type=button], input[type=submit], input[type=reset]') ? clean(el.value)
+        : ['input', 'textarea', 'select'].includes(el.tagName.toLowerCase()) ? '' : clean(el.innerText || el.value),
     label: labelOf(el),
     css: cssPath(el),
   });
   const isTextField = (el) => el.matches('textarea, input:not([type]), input[type=text], input[type=search], ' +
                                          'input[type=number], input[type=email], input[type=tel], input[type=url]');
+  // Custom dropdowns (CNKI-style): an item among siblings in a popup list.
+  const choiceOf = (el) => {
+    const item = el.closest('li,[role=option],dd,.option,.item');
+    if (!item) return null;
+    const box = item.closest('ul,ol,[role=listbox],dl,.dropdown,.select-list,.sort-list');
+    if (!box || box.querySelectorAll('li,[role=option],dd,.option,.item').length < 2) return null;
+    if (item.querySelector('a[href]:not([href^="javascript"]):not([href="#"])')) return null;  // a real link list
+    return {item, box};
+  };
   document.addEventListener('click', (e) => {
+    const choice = choiceOf(e.target);
+    if (choice) {
+      send({kind: 'choose', target: describe(choice.item), value: clean(choice.item.innerText),
+            box: cssPath(choice.box), frame: location.href});
+      return;
+    }
     let el = e.target.closest('a,button,label,option,summary,[role=button],[role=link],[role=tab],[role=option],' +
                               '[role=menuitem],[onclick],li,td,span,div,input,select') || e.target;
     if (isTextField(el) || el.matches('select')) return;  // focusing a field isn't a step; its value is
@@ -89,6 +119,13 @@ RECORDER_JS = r"""
       send({kind: 'check', target: describe(el), checked: el.checked, frame: location.href});
     } else if (isTextField(el)) {
       send({kind: 'fill', target: describe(el), value: el.value, frame: location.href});
+    }
+  }, true);
+  // Typing is recorded as it happens (change only fires when the box loses
+  // focus, which would put the step after later clicks).
+  document.addEventListener('input', (e) => {
+    if (isTextField(e.target)) {
+      send({kind: 'fill', target: describe(e.target), value: e.target.value, frame: location.href});
     }
   }, true);
   document.addEventListener('keydown', (e) => {
@@ -124,8 +161,16 @@ class Flow:
 def _merge_steps(raw: list[dict]) -> list[dict]:
     """Collapse the event stream into replayable steps."""
     steps: list[dict] = []
+    last_fill: dict[str, str] = {}  # field -> value already recorded
     for ev in raw:
         kind = ev.get("kind")
+        if kind == "fill":
+            key = json.dumps(ev["target"], sort_keys=True)
+            if not ev.get("enter") and last_fill.get(key) == ev.get("value") and not (
+                steps and steps[-1]["kind"] == "fill" and steps[-1]["target"] == ev["target"]
+            ):
+                continue  # the change event repeating a value typed earlier
+            last_fill[key] = ev.get("value", "")
         if kind == "fill" and steps and steps[-1]["kind"] == "fill" and steps[-1]["target"] == ev["target"]:
             # keydown(Enter) and change fire for the same field: keep one step
             steps[-1]["value"] = ev["value"]
@@ -139,6 +184,7 @@ def _merge_steps(raw: list[dict]) -> list[dict]:
 
 def _param_name(target: dict, used: set[str]) -> str:
     base = target.get("label") or target.get("placeholder") or target.get("aria") or target.get("name") or "输入"
+    base = base.split("、")[0] if len(base) > 8 else base  # "中文文献、外文文献" -> "中文文献"
     base = re.sub(r"[:：*\s]+$", "", base)[:20] or "输入"
     name, i = base, 2
     while name in used:
@@ -151,7 +197,13 @@ def build_flow(name: str, description: str, start_url: str, raw_events: list[dic
     steps = _merge_steps(raw_events)
     params, used = [], set()
     for i, st in enumerate(steps):
-        if st["kind"] in ("fill", "select"):
+        if st["kind"] == "choose":
+            # Name it after the dropdown's trigger (the click just before), e.g. "主题"→"主题选择".
+            prev = steps[i - 1]["target"].get("text", "") if i and steps[i - 1]["kind"] == "click" else ""
+            pname = _param_name({"label": (prev[:10] + "选择") if prev else "选项"}, used)
+            st["param"] = pname
+            params.append({"name": pname, "example": st.get("value", ""), "step": i})
+        elif st["kind"] in ("fill", "select"):
             pname = _param_name(st["target"], used)
             st["param"] = pname
             params.append({"name": pname, "example": st.get("value", ""), "step": i})
@@ -219,6 +271,8 @@ def _candidates(frame, t: dict):
         out.append(frame.get_by_placeholder(t["placeholder"], exact=True))
     if t.get("aria"):
         out.append(frame.locator(f'[aria-label="{t["aria"]}"]'))
+    if t.get("text") and tag == "input":  # <input type=button value="检索">
+        out.append(frame.locator(f'input[value="{t["text"]}"]'))
     if t.get("text") and tag not in ("input", "select", "textarea"):
         out.append(frame.locator(tag).filter(has_text=re.compile("^\\s*" + re.escape(t["text"]) + "\\s*$")))
         out.append(frame.get_by_text(t["text"], exact=True))
@@ -231,6 +285,36 @@ def _candidates(frame, t: dict):
 
 def _css_escape(s: str) -> str:
     return re.sub(r"([^\w-])", r"\\\1", s)
+
+
+async def _find_choice(page: Page, step: dict, value: str, timeout: float = 10.0):
+    """The item reading `value` in the recorded popup list (or anywhere visible)."""
+    deadline = time.monotonic() + timeout
+    exact = re.compile("^\\s*" + re.escape(value) + "\\s*$")
+    while True:
+        for frame in page.frames:
+            scopes = []
+            if step.get("box"):
+                scopes.append(frame.locator(step["box"]))
+            scopes.append(frame.locator("body"))
+            for scope in scopes:
+                loc = scope.locator("li,[role=option],dd,.option,.item").filter(has_text=exact)
+                try:
+                    n = await loc.count()
+                    for i in range(n):
+                        item = loc.nth(i)
+                        if await item.is_visible():
+                            # Click the text itself (often a link inside the item), as a
+                            # person would; the item's centre can be empty space.
+                            inner = item.get_by_text(value, exact=True)
+                            if await inner.count() and await inner.first.is_visible():
+                                return inner.first
+                            return item
+                except Exception:
+                    continue
+        if time.monotonic() > deadline:
+            raise LookupError(f"下拉列表里找不到选项「{value}」")
+        await asyncio.sleep(0.4)
 
 
 async def _find(page: Page, step: dict, timeout: float = 10.0):
@@ -273,9 +357,21 @@ async def replay(context: BrowserContext, page: Page, flow: Flow, params: dict |
     await _settle(page)
     for i, step in enumerate(flow.steps, 1):
         kind = step["kind"]
-        loc = await _find(page, step)
         before = len(context.pages)
-        if kind == "click":
+        nxt = flow.steps[i] if i < len(flow.steps) else None
+        opens_tab = nxt is not None and nxt.get("page", 0) > step.get("page", 0)
+        if kind == "choose":
+            value = params.get(step.get("param", ""), step.get("value", ""))
+            loc = await _find_choice(page, step, value)
+        else:
+            loc = await _find(page, step)
+        if kind in ("click", "choose") and opens_tab:
+            # The recording shows the next step in a window this click opens.
+            async with context.expect_page(timeout=20000) as new_page:
+                await loc.click(timeout=5000)
+            page = await new_page.value
+            await page.bring_to_front()
+        elif kind in ("click", "choose"):
             try:
                 await loc.click(timeout=5000)
             except Exception:
@@ -301,12 +397,17 @@ async def replay(context: BrowserContext, page: Page, flow: Flow, params: dict |
 
 def describe_step(step: dict) -> str:
     t = step.get("target", {})
-    what = t.get("label") or t.get("text") or t.get("placeholder") or t.get("aria") or t.get("name") or t.get("tag", "")
     kind = step.get("kind")
+    if kind in ("click", "choose"):
+        what = t.get("text") or t.get("aria") or t.get("title") or t.get("tag", "")
+    else:
+        what = t.get("label") or t.get("placeholder") or t.get("aria") or t.get("name") or t.get("tag", "")
     if kind == "fill":
         return f"输入「{what}」= {step.get('value', '')}" + ("（回车）" if step.get("enter") else "")
     if kind == "select":
         return f"选择「{what}」= {step.get('value', '')}"
+    if kind == "choose":
+        return f"下拉选择 = {step.get('value', '')}"
     if kind == "check":
         return f"{'勾选' if step.get('checked') else '取消勾选'}「{what}」"
     return f"点击「{what}」"

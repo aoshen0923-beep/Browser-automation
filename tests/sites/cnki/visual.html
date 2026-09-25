@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>计量可视化分析</title>
+<div id="tabs" class="hidden"><span role="tab" id="t1">总体趋势</span> <span role="tab" id="t2">作者</span> <span role="tab" id="t3">机构</span></div>
+<div id="info"></div>
+<canvas id="chart" width="480" height="240"></canvas>
+<script>
+  const p = new URLSearchParams(location.search);
+  setTimeout(() => { document.getElementById("tabs").className = ""; }, 600);
+  t2.onclick = () => {
+    info.innerText = `作者分布（${p.get("field")}=${p.get("kw")}，${p.get("y1")}-${p.get("y2")}${p.get("cssci") === "1" ? "，CSSCI" : ""}）`;
+    // The numbers are only drawn on a canvas, like ECharts: text reading can't see them.
+    const c = chart.getContext("2d"); c.fillStyle = "#2563eb";
+    [["唐代兴", 160], ["谭光辉", 120], ["汪洪亮", 90]].forEach(([n, w], i) => { c.fillRect(90, 20 + i * 60, w * 2, 36); c.fillText(n, 10, 42 + i * 60); });
+  };
+</script>
