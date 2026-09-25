@@ -45,6 +45,7 @@ jobs:
           $exe = Resolve-Path dist\quizpilot\quizpilot.exe
           New-Item -ItemType Directory smoke | Out-Null
           Set-Location smoke
+          & $exe --version
           & $exe init
           & $exe sites --modules 11
           & $exe ingest ..\README.md
@@ -120,6 +121,9 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           if ($env:VERSION -notmatch '^v\d+\.\d+\.\d+$') { throw "version must look like v0.1.1, got '$env:VERSION'" }
+          # The exe reports its version at startup; keep it in sync with the release.
+          $built = (& dist\quizpilot\quizpilot.exe --version | Out-String).Trim()
+          if ($built -ne "quizpilot $($env:VERSION.TrimStart('v'))") { throw "exe says '$built' but releasing $env:VERSION; bump __version__" }
           gh release view $env:VERSION 2>$null
           if ($LASTEXITCODE -eq 0) { throw "$env:VERSION already exists; pick a new version number" }
           # Draft first: immutable releases only accept assets before publishing.

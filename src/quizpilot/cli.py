@@ -299,7 +299,11 @@ async def _answer_one(q, kb, model, cfg: Config, args, browser=None) -> None:
 
 def _use_watch(args) -> bool:
     """Clipboard watching in a real Windows console unless --paste is given."""
-    return not args.paste and sys.platform == "win32" and sys.stdin.isatty()
+    if args.paste or sys.platform != "win32":
+        return False
+    from .console import has_console_input
+
+    return has_console_input() or sys.stdin.isatty()
 
 
 def _pasted_questions():
@@ -312,28 +316,49 @@ def _pasted_questions():
 
 
 def _watch_clipboard(interval: float = 0.3):
-    """Yield each newly copied question. Ctrl+C ends the session."""
-    from .console import disable_quick_edit, looks_like_question, read_clipboard
+    """Yield each newly copied question. Ctrl+C ends the session.
+
+    A copy is detected by the clipboard sequence number where available, so
+    copying the same question again answers it again.
+    """
+    from .console import clipboard_sequence, disable_quick_edit, looks_like_question, read_clipboard
 
     disable_quick_edit()
     print("\n>>> Ready. Copy a question with its options (Ctrl+C on the exam page).")
     print(">>> Answering starts automatically. Press Ctrl+C in this window to quit.", flush=True)
-    last = read_clipboard()  # ignore whatever was copied before we started
+    last_seq = clipboard_sequence()
+    last_text = read_clipboard()  # ignore whatever was copied before we started
     while True:
         time.sleep(interval)
-        text = read_clipboard()
-        if not text or text == last:
+        seq = clipboard_sequence()
+        if seq is not None:
+            if seq == last_seq:
+                continue
+            last_seq = seq
+            text = read_clipboard()
+        else:
+            text = read_clipboard()
+            if text == last_text:
+                continue
+        last_text = text
+        if not text:
             continue
-        last = text
         if looks_like_question(text):
             print("\n" + "-" * 60 + f"\n{text}\n" + "-" * 60, flush=True)
             yield text
+        else:
+            preview = text.replace("\n", " ")[:40]
+            print(f"(copied \"{preview}\" - not a question with options, ignored)", flush=True)
 
 
 def cmd_ask(args, cfg: Config) -> int:
     from .browser import Browser
     from .question import parse_question
 
+    from . import __version__
+
+    mode = "copy-to-answer" if (not args.question and _use_watch(args)) else "paste"
+    print(f"quizpilot {__version__} ({mode} mode)", flush=True)
     model = _model(cfg)
     # One event loop for the whole session, driven from the main thread.
     # Console input is read between questions, never from a worker thread
@@ -436,7 +461,10 @@ def cmd_samples(args, cfg: Config) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from . import __version__
+
     p = argparse.ArgumentParser(prog="quizpilot", description="Research co-pilot for the AI+ information literacy contest")
+    p.add_argument("--version", action="version", version=f"quizpilot {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("init", help="create quizpilot.toml in this folder").set_defaults(fn=cmd_init)

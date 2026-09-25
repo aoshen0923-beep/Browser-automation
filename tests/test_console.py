@@ -14,6 +14,7 @@ def test_watch_yields_only_new_questions(monkeypatch):
     clips = iter(["old stuff copied before start", "old stuff copied before start", "a url https://x.cn/abc",
                   Q.replace("\r\n", "\n"), Q.replace("\r\n", "\n"), "雨课堂是插件。（）"])
     monkeypatch.setattr(console, "read_clipboard", lambda: next(clips))
+    monkeypatch.setattr(console, "clipboard_sequence", lambda: None)
     monkeypatch.setattr(console, "disable_quick_edit", lambda: None)
     got = []
     gen = cli._watch_clipboard(interval=0)
@@ -27,7 +28,7 @@ def test_use_watch_only_in_windows_console(monkeypatch):
         paste = False
 
     monkeypatch.setattr(cli.sys, "platform", "win32")
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(console, "has_console_input", lambda: True)
     assert cli._use_watch(Args())
     Args.paste = True
     assert not cli._use_watch(Args())
@@ -47,3 +48,21 @@ def test_windows_clipboard_roundtrip():
         pytest.skip(f"no clipboard in this session: {r.stderr[:200]!r}")
     assert console.read_clipboard() == text
     console.disable_quick_edit()  # must not raise, even without a console
+
+
+def test_watch_answers_the_same_question_copied_again(monkeypatch, capsys):
+    """Copying identical text again must still trigger (Windows sequence number)."""
+    q = Q.replace("\r\n", "\n")
+    seqs = iter([5, 5, 6, 6, 7, 8])
+    texts = iter([q, q, q, "hello there"])
+    monkeypatch.setattr(console, "clipboard_sequence", lambda: next(seqs))
+    monkeypatch.setattr(console, "read_clipboard", lambda: next(texts))
+    monkeypatch.setattr(console, "disable_quick_edit", lambda: None)
+    gen = cli._watch_clipboard(interval=0)
+    assert next(gen) == q  # copied again at seq 6, same text as at start
+    assert next(gen) == q  # and again at seq 7
+    import pytest
+
+    with pytest.raises(RuntimeError):  # fake clipboard exhausted inside the generator
+        next(gen)  # seq 8: not a question -> ignored with a note, then clips run out
+    assert "not a question" in capsys.readouterr().out

@@ -61,6 +61,18 @@ def _tk_clipboard() -> str:
         return ""
 
 
+def clipboard_sequence() -> int | None:
+    """Windows bumps this on every copy, even when the text is identical."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        return int(ctypes.windll.user32.GetClipboardSequenceNumber())
+    except Exception:
+        return None
+
+
 def read_clipboard() -> str:
     try:
         text = _win_clipboard() if sys.platform == "win32" else _tk_clipboard()
@@ -77,6 +89,20 @@ def looks_like_question(text: str) -> bool:
     if len(q.options) >= 2:
         return True
     return any(mark in text for mark in ("（）", "()", "（ ）", "对错", "判断"))
+
+
+def has_console_input() -> bool:
+    """True when stdin is a real Windows console (not a pipe or file)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        mode = ctypes.c_uint32()
+        return bool(kernel32.GetConsoleMode(kernel32.GetStdHandle(-10), ctypes.byref(mode)))
+    except Exception:
+        return False
 
 
 def disable_quick_edit() -> None:
