@@ -102,7 +102,9 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
 3. 找到能判断答案的原文后立刻 answer，不要多余操作。每个选项都要核对。
 4. 不要重复同一个失败的动作；元素编号每一步都会刷新，只用最新的编号。
 5. 页面需要登录或出现验证码时，程序会暂停等用户处理，你继续即可。
-6. answer 不能为空：单选一个字母，多选2-4个字母，判断题"对"或"错"。时间不够时也要给出最可能的答案，用 confidence（0-1，诚实）表示把握。
+6. 题库、答案分享、问答类网站（如 itihey、百度知道、百度文库、作业帮、道客巴巴）上的答案经常是错的，
+   只能当线索，要到官方网站核实；只凭这类网站作答时 confidence 不要超过0.5。
+7. answer 不能为空：单选一个字母，多选2-4个字母，判断题"对"或"错"。时间不够时也要给出最可能的答案，用 confidence（0-1，诚实）表示把握。
 {actions}
 
 网站目录（模块：网址）：
@@ -618,6 +620,10 @@ class Agent:
                     observation = await self.observe()
         finally:
             urls = [s.action.get("url") for s in steps if s.action.get("url")]
+            try:
+                last_url = self.page.url if self.page is not None else ""
+            except Exception:
+                last_url = ""
             if close and self.page is not None:
                 try:
                     await self.page.close()
@@ -635,6 +641,10 @@ class Agent:
         reason = str(final.get("reason", ""))
         if final.get("evidence"):
             reason += f"  证据：{str(final['evidence'])[:200]}"
+        final_url = self.page.url if self.page is not None and not self.page.is_closed() else ""
+        if answer and unreliable(final_url or last_url):
+            conf = min(conf, 0.5)
+            reason = "（依据来自题库/答案分享网站，可能不准，建议到官方网站核实）" + reason
         if answer:
             self._save_recipe(q, steps, final, conf)
         ans = Answer(answer, conf, reason=reason, seconds=time.monotonic() - start)
@@ -642,6 +652,20 @@ class Agent:
 
 
 PAGE_CHANGING = {"goto", "search", "click", "back", "flow"}
+
+# Question banks and answer-sharing sites: often wrong, never the only proof.
+UNRELIABLE_HOSTS = (
+    "itihey.com", "zhidao.baidu.com", "wenku.baidu.com", "wen.baidu.com", "zuoyebang.com",
+    "docin.com", "doc88.com", "shangxueba.com", "asklib.com", "examcoo.com", "ppkao.com",
+    "mayiwenku.com", "renrendoc.com", "book118.com", "jingyan.baidu.com", "tiku", "daan",
+)
+
+
+def unreliable(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    host = urlparse(url or "").netloc.lower()
+    return any(h in host for h in UNRELIABLE_HOSTS)
 
 
 def _repeats(action: dict, steps: list[Step]) -> str:

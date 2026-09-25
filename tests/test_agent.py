@@ -358,3 +358,12 @@ def test_vision_switches_off_when_the_model_rejects_images(std_site, chrome):  #
     result, second_vision = asyncio.run(run())
     assert result.answer.answer == "C"
     assert model.vision_unsupported is True and second_vision is False
+
+
+def test_answers_from_question_bank_sites_are_capped():
+    from quizpilot.agent import unreliable
+
+    assert unreliable("https://itihey.com/question/v1/165994058")
+    assert unreliable("https://zhidao.baidu.com/question/1.html")
+    assert not unreliable("https://openstd.samr.gov.cn/bzgk/gb/newGbInfo?hcno=1")
+    assert not unreliable("")
