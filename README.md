@@ -58,8 +58,8 @@ tagged versions such as `v0.2.0` also appear under Releases). To use it:
 4. Run `quizpilot chrome` and log in with **your own** accounts. Never share
    Chrome profiles: they contain your login cookies.
 
-Teammates need read access to the repository to download the build. The
-repository owner adds them under Settings → Collaborators.
+Permanent download link for the latest version:
+https://github.com/aoshen0923-beep/Browser-automation/releases/latest
 
 **Split the prep, then merge.** Divide the 50 modules, for example:
 
