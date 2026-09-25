@@ -57,6 +57,36 @@ jobs:
           if ($out -notmatch "Can't reach Chrome") { throw "unexpected crawl output: $out" }
           exit 0
 
+      - name: Smoke test interactive ask, with and without live Chrome
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Resolve-Path dist\quizpilot\quizpilot.exe
+          Set-Location smoke
+          # A dead API endpoint: each question fails fast with an error, which
+          # must be reported without ending the session.
+          $env:DEEPSEEK_API_KEY = "dummy"
+          $env:QUIZPILOT_BASE_URL = "http://127.0.0.1:9"
+          $q = "《儿童口罩技术规范》以下哪一位不是起草人？`nA、高尚荣`nB、李桂梅`nC、许伟民`nD、李建全`n`n"
+          $out = ($q + $q) | & $exe ask 2>&1 | Out-String
+          Write-Host $out
+          if (([regex]::Matches($out, "-> single, 4 options")).Count -ne 2) { throw "interactive ask did not read both questions" }
+          if ($out -notmatch "input closed") { throw "interactive ask did not exit cleanly" }
+
+          & $exe chrome
+          $ok = $false
+          foreach ($i in 1..40) {
+            try { Invoke-RestMethod http://127.0.0.1:9222/json/version | Out-Null; $ok = $true; break } catch { Start-Sleep -Milliseconds 500 }
+          }
+          if (-not $ok) { throw "quizpilot chrome did not start Chrome with remote debugging" }
+          $out = $q | & $exe ask --live --budget 20 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch "-> single, 4 options") { throw "live ask did not read the question" }
+          if ($out -notmatch "Searching live in Chrome") { throw "live ask did not start the browser agent" }
+          if ($out -notmatch "input closed") { throw "live ask did not keep the session alive after an error" }
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
+          exit 0
+
       - name: Smoke test the shell launcher outside the extracted folder
         shell: pwsh
         run: |

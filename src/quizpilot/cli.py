@@ -20,6 +20,13 @@ def _utf8_console() -> None:
             stream.reconfigure(encoding="utf-8")
         except Exception:
             pass
+    # Piped input (scripts, CI) would otherwise use the ANSI code page on
+    # Windows; typing or pasting into the console is unaffected.
+    try:
+        if not sys.stdin.isatty():
+            sys.stdin.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _open_kb(cfg: Config) -> KB:
@@ -303,32 +310,37 @@ def cmd_ask(args, cfg: Config) -> int:
     from .question import parse_question
 
     model = _model(cfg)
-
-    async def run() -> None:
-        with _open_kb(cfg) as kb:
-            if args.live:
-                async with Browser(cfg.browser.cdp_url) as browser:
-                    await loop(kb, browser)
-            else:
-                await loop(kb, None)
-
-    async def loop(kb, browser) -> None:
-        if args.question:
-            q = parse_question(" ".join(args.question), args.kind)
-            await _answer_one(q, kb, model, cfg, args, browser)
-            return
-        while True:
-            raw = await asyncio.to_thread(_read_question)
-            if not raw:
-                break
-            q = parse_question(raw, args.kind)
-            print(f"-> {q.kind}, {len(q.options)} options")
-            await _answer_one(q, kb, model, cfg, args, browser)
-
-    try:
-        asyncio.run(run())
-    except KeyboardInterrupt:
-        print()
+    # One event loop for the whole session, driven from the main thread.
+    # Console input is read between questions, never from a worker thread
+    # (on Windows that ended the program right after a paste).
+    with asyncio.Runner() as runner, _open_kb(cfg) as kb:
+        browser = None
+        if args.live:
+            browser = Browser(cfg.browser.cdp_url)
+            runner.run(browser.__aenter__())
+        try:
+            if args.question:
+                q = parse_question(" ".join(args.question), args.kind)
+                runner.run(_answer_one(q, kb, model, cfg, args, browser))
+                return 0
+            while True:
+                raw = _read_question()
+                if raw is None:
+                    print("(input closed - exiting)")
+                    break
+                q = parse_question(raw, args.kind)
+                print(f"-> {q.kind}, {len(q.options)} options")
+                try:
+                    runner.run(_answer_one(q, kb, model, cfg, args, browser))
+                except KeyboardInterrupt:
+                    print("\n(stopped this question)")
+                except Exception as e:  # keep the session alive for the next question
+                    print(f"\n!! {type(e).__name__}: {e}")
+        except KeyboardInterrupt:
+            print()
+        finally:
+            if browser is not None:
+                runner.run(browser.__aexit__(None, None, None))
     return 0
 
 

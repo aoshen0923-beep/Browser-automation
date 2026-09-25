@@ -73,3 +73,32 @@ def test_crawl_job_selection(monkeypatch):
     assert seen["jobs"] == [("07", "https://x.test/a")]
     cli.main(["crawl", "--modules", "11"])
     assert seen["jobs"] and all(m == "11" for m, _ in seen["jobs"])
+
+
+def test_interactive_ask_reads_pasted_lines(monkeypatch, capsys):
+    from quizpilot import cli
+    from quizpilot.solver import Answer
+
+    lines = iter(["《儿童口罩技术规范》以下哪一位不是起草人？（）", "A、高尚荣", "B、李桂梅", "C、许伟民", "D、李建全", ""])
+
+    def fake_input(prompt=""):
+        try:
+            return next(lines)
+        except StopIteration:
+            raise EOFError
+
+    seen = []
+
+    def fake_solve(q, kb, model, top_k):
+        seen.append(q)
+        return Answer("C", 0.9, reason="ok")
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr(cli, "_model", lambda cfg: object())
+    monkeypatch.setattr(cli, "_open_kb", lambda cfg: __import__("quizpilot.kb").kb.KB(":memory:"))
+    monkeypatch.setattr("quizpilot.solver.solve", fake_solve)
+    assert cli.main(["ask"]) == 0
+    out = capsys.readouterr().out
+    assert len(seen) == 1 and seen[0].options["C"] == "许伟民"
+    assert "-> single, 4 options" in out and "C    confidence 0.90" in out
+    assert "(input closed - exiting)" in out
