@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+build/
+dist/
+# Local state: knowledge base, downloads, browser profile, secrets
+quizpilot.toml
+kb/
+downloads/
+chrome-profile/
+*.sqlite

@@ -1,0 +1,499 @@
+[
+ {
+  "module": "01",
+  "title": "AI素养-AI基础知识与伦理规范",
+  "urls": [
+   "https://unesdoc.unesco.org/ark:/48223/pf0000391105"
+  ]
+ },
+ {
+  "module": "02",
+  "title": "AI素养-AI学习资源的获取与利用",
+  "urls": [
+   "https://www.lib.szu.edu.cn/learning/ai",
+   "https://zh.d2l.ai",
+   "https://www.elementsofai.com"
+  ]
+ },
+ {
+  "module": "03",
+  "title": "AI素养-通用AI工具认知与应用",
+  "urls": [
+   "https://chat.deepseek.com",
+   "https://www.doubao.com",
+   "https://yuanbao.tencent.com",
+   "https://chatglm.cn",
+   "https://www.qianwen.com",
+   "https://www.kimi.com",
+   "https://xinghuo.xfyun.cn",
+   "https://yiyan.baidu.com",
+   "https://www.n.cn"
+  ]
+ },
+ {
+  "module": "04",
+  "title": "AI素养-办公场景下的AI工具",
+  "urls": [
+   "https://www.kimi.com",
+   "https://www.qianwen.com",
+   "https://www.doubao.com",
+   "https://chatglm.cn"
+  ]
+ },
+ {
+  "module": "05",
+  "title": "AI素养-科研场景下的AI工具",
+  "urls": [
+   "https://www.sciencedirect.com/leapspace/",
+   "https://eci.elsevier.cn/resource/LeapSpace.html?fid=165&menuid=358&infoid=2004",
+   "https://ai.cnki.net",
+   "https://paper.iflytek.com",
+   "https://metaso.cn",
+   "https://www.aminer.cn"
+  ]
+ },
+ {
+  "module": "06",
+  "title": "AI素养-多模态AI工具",
+  "urls": [
+   "https://www.doubao.com",
+   "https://chatglm.cn",
+   "https://tongyi.aliyun.com/wanxiang/",
+   "https://klingai.com"
+  ]
+ },
+ {
+  "module": "07",
+  "title": "AI素养-AI开源与开放数据资源",
+  "urls": [
+   "https://github.com",
+   "https://github.com/onnx/onnx/tree/main/LICENSES",
+   "https://modelscope.cn",
+   "https://aistudio.baidu.com",
+   "https://www.heywhale.com",
+   "https://tianchi.aliyun.com/dataset",
+   "https://www.datafountain.cn",
+   "https://opendatalab.com",
+   "https://www.openml.org",
+   "https://archive.ics.uci.edu",
+   "https://archive-beta.ics.uci.edu"
+  ]
+ },
+ {
+  "module": "08",
+  "title": "政府开放信息-思政信息资源",
+  "urls": [
+   "http://jhsjk.people.cn",
+   "https://www.12371.cn",
+   "https://xhsz.news.cn"
+  ]
+ },
+ {
+  "module": "09",
+  "title": "政府开放信息-开放数据资源",
+  "urls": [
+   "https://data.stats.gov.cn/dg/website/page.html#/pc/national/home",
+   "https://www.escience.org.cn/data-center",
+   "https://www.scidb.cn",
+   "https://data.worldbank.org"
+  ]
+ },
+ {
+  "module": "10",
+  "title": "政府开放信息-法律信息资源",
+  "urls": [
+   "https://flk.npc.gov.cn",
+   "http://www.gov.cn/zhengce/xzfgk/",
+   "http://xzfg.moj.gov.cn/search2.html",
+   "https://www.gov.cn/zhengce/xxgk/gjgzk/index.htm",
+   "https://www.moj.gov.cn/pub/sfbgw/gwygzk/index.html",
+   "https://rmfyalk.court.gov.cn",
+   "http://gongbao.court.gov.cn",
+   "http://zxgk.court.gov.cn",
+   "http://tingshen.court.gov.cn",
+   "https://wenshu.court.gov.cn",
+   "https://lawpro.cnki.net/"
+  ]
+ },
+ {
+  "module": "11",
+  "title": "政府开放信息-标准与商标信息资源",
+  "urls": [
+   "https://openstd.samr.gov.cn",
+   "http://std.samr.gov.cn/gb",
+   "https://sppt.cfsa.net.cn:8086/db",
+   "http://gb2760.cfsa.net.cn",
+   "https://sppt.cfsa.net.cn:8087/db",
+   "https://www.mee.gov.cn/ywgz/fgbz/bz/",
+   "https://www.mohurd.gov.cn/gongkai/fdzdgknr/bzgg/index.html",
+   "https://sbj.cnipa.gov.cn/sbj/sbcx"
+  ]
+ },
+ {
+  "module": "12",
+  "title": "政府开放信息-专利和地理标志",
+  "urls": [
+   "http://epub.cnipa.gov.cn/",
+   "https://pss-system.cponline.cnipa.gov.cn/",
+   "https://www.uspto.gov/patents/search/patent-public-search",
+   "https://ie.espacenet.com",
+   "https://patentscope2.wipo.int/search/en/search.jsf",
+   "https://ggfw.cnipa.gov.cn/dlbzsq/dbQuery"
+  ]
+ },
+ {
+  "module": "13",
+  "title": "政府开放信息-反诈防骗信息资源",
+  "urls": [
+   "http://www.piyao.org.cn",
+   "https://www.piyao.org.cn/pysjk/frontsql.htm"
+  ]
+ },
+ {
+  "module": "14",
+  "title": "政府开放信息-医卫信息查询",
+  "urls": [
+   "http://www.nhc.gov.cn",
+   "https://www.nmpa.gov.cn/datasearch/home-index.html",
+   "https://chkd.cnki.net/ai/"
+  ]
+ },
+ {
+  "module": "15",
+  "title": "政府开放信息-文教信息查询",
+  "urls": [
+   "https://www.neea.edu.cn",
+   "https://yz.chsi.com.cn",
+   "https://www.ncss.cn",
+   "https://gj.ncss.cn",
+   "https://cy.ncss.cn"
+  ]
+ },
+ {
+  "module": "16",
+  "title": "政府开放信息-证书资格查询",
+  "urls": [
+   "https://www.chsi.com.cn",
+   "https://gs.sac.net.cn/pages/registration/new-sac-publicity-org.html",
+   "https://www.amac.org.cn/fwdt/wyc/jgcprycx/rycx",
+   "https://www.china-cba.net/Index/lists/catid/31.html",
+   "https://cmis.cicpa.org.cn",
+   "https://credit.acla.org.cn",
+   "https://press.nppa.gov.cn"
+  ]
+ },
+ {
+  "module": "17",
+  "title": "实用学习资源-在线开放课程资源",
+  "urls": [
+   "https://www.icourse163.org",
+   "https://www.xuetangx.com",
+   "https://www.zhihuishu.com",
+   "https://www.xueyinonline.com",
+   "https://higher.smartedu.cn",
+   "https://vocational.smartedu.cn",
+   "https://lifelong.smartedu.cn",
+   "https://basic.smartedu.cn",
+   "http://www.ilab-x.com",
+   "https://www.icourses.cn/courseInfo?courseIndex=3&courseType=2&courseTypeId=2",
+   "https://www.icourses.cn/courseInfo?courseIndex=4&courseType=1&courseTypeId=1",
+   "https://open.163.com"
+  ]
+ },
+ {
+  "module": "18",
+  "title": "实用学习资源-开放平台中的学习资源",
+  "urls": [
+   "https://suyang.zxhnzq.com/lecture",
+   "https://k.cnki.net/home",
+   "https://video.wanfangdata.com.cn",
+   "https://www.xuexi.cn",
+   "https://www.yixi.tv",
+   "https://www.ted.com",
+   "https://zhida.zhihu.com",
+   "https://www.heywhale.com",
+   "https://aistudio.baidu.com",
+   "https://tianchi.aliyun.com",
+   "https://www.datafountain.cn"
+  ]
+ },
+ {
+  "module": "19",
+  "title": "实用学习资源-免费电子书",
+  "urls": [
+   "https://www.cambridge.org/core",
+   "https://academic.oup.com/books",
+   "https://www.ncbi.nlm.nih.gov/books/"
+  ]
+ },
+ {
+  "module": "20",
+  "title": "实用学习资源-国家图书馆免费数字资源",
+  "urls": [
+   "http://www.nlc.cn",
+   "http://read.nlc.cn/thematDataSearch/toGujiIndex",
+   "http://read.nlc.cn/specialResourse/minguoIndex",
+   "https://www.loc.gov"
+  ]
+ },
+ {
+  "module": "21",
+  "title": "学术信息资源-期刊论文的检索",
+  "urls": [
+   "https://www.cnki.net",
+   "https://www.wanfangdata.com.cn",
+   "https://www.cqvip.com",
+   "https://www.sciencedirect.com",
+   "https://onlinelibrary.wiley.com",
+   "https://www.tandfonline.com",
+   "https://dl.acm.org",
+   "https://asmedigitalcollection.asme.org",
+   "https://www.nature.com",
+   "https://www.cell.com",
+   "https://www.science.org"
+  ]
+ },
+ {
+  "module": "22",
+  "title": "学术信息资源-学术会议论文及会议信息",
+  "urls": [
+   "https://www.ieee.org/conferences/index.html",
+   "https://conf.cnki.net"
+  ]
+ },
+ {
+  "module": "23",
+  "title": "学术信息资源-学位论文及资源获取",
+  "urls": [
+   "http://www.nlc.cn",
+   "https://dspace.mit.edu/handle/1721.1/7582"
+  ]
+ },
+ {
+  "module": "24",
+  "title": "学术信息资源-OA、预印本及其他免费资源",
+  "urls": [
+   "https://doaj.org",
+   "https://www.oalib.com",
+   "https://arxiv.org",
+   "https://chinaxiv.org",
+   "https://www.medrxiv.org",
+   "https://www.ncpssd.cn",
+   "https://www.modernhistory.org.cn"
+  ]
+ },
+ {
+  "module": "25",
+  "title": "学术信息资源-科研项目数据库",
+  "urls": [
+   "http://fz.people.com.cn/skygb/sk/index.php/index/index/4541",
+   "https://kd.nsfc.cn"
+  ]
+ },
+ {
+  "module": "26",
+  "title": "信息检索系统-学术搜索",
+  "urls": [
+   "https://xueshu.baidu.com",
+   "https://pubmed.ncbi.nlm.nih.gov",
+   "https://pubscholar.cn",
+   "https://www.nstl.gov.cn",
+   "https://www.aminer.cn"
+  ]
+ },
+ {
+  "module": "27",
+  "title": "信息检索系统-图片搜索",
+  "urls": [
+   "https://image.baidu.com",
+   "https://pic.sogou.com",
+   "https://image.so.com",
+   "https://cn.bing.com/images",
+   "https://www.iconfont.cn",
+   "https://unsplash.com",
+   "https://pixabay.com",
+   "https://image.cnki.net/AI",
+   "https://scidraw.io",
+   "https://smart.servier.com"
+  ]
+ },
+ {
+  "module": "28",
+  "title": "信息检索系统-网址导航",
+  "urls": [
+   "https://hao.uisdc.com",
+   "http://www.hippter.com",
+   "https://www.wenxianxue.cn",
+   "https://ai-bot.cn"
+  ]
+ },
+ {
+  "module": "29",
+  "title": "信息检索系统-网络指数",
+  "urls": [
+   "https://index.baidu.com/v2/index.html",
+   "https://trendinsight.oceanengine.com"
+  ]
+ },
+ {
+  "module": "30",
+  "title": "信息检索系统-馆藏查询系统",
+  "urls": [
+   "http://www.nlc.cn"
+  ]
+ },
+ {
+  "module": "31",
+  "title": "信息检索理论与技术-高级检索",
+  "urls": [
+   "https://kns.cnki.net/kns8s/AdvSearch",
+   "https://www.wanfangdata.com.cn",
+   "https://www.cqvip.com",
+   "https://www.sciencedirect.com/search",
+   "https://onlinelibrary.wiley.com/search/advanced",
+   "https://www.tandfonline.com/search/advanced",
+   "https://pubmed.ncbi.nlm.nih.gov/advanced/",
+   "https://ieeexplore.ieee.org/search/advanced",
+   "https://www.spiedigitallibrary.org"
+  ]
+ },
+ {
+  "module": "32",
+  "title": "信息检索理论与技术-布尔逻辑检索",
+  "urls": [
+   "https://dl.acm.org/search/advanced"
+  ]
+ },
+ {
+  "module": "33",
+  "title": "信息检索理论与技术-截词检索",
+  "urls": [
+   "https://pubmed.ncbi.nlm.nih.gov/help/",
+   "https://onlinelibrary.wiley.com/search/advanced",
+   "https://dl.acm.org/search/advanced",
+   "http://epub.cnipa.gov.cn/"
+  ]
+ },
+ {
+  "module": "34",
+  "title": "信息检索理论与技术-精确与模糊匹配",
+  "urls": []
+ },
+ {
+  "module": "35",
+  "title": "信息检索理论与技术-结果筛选",
+  "urls": [
+   "https://onlinelibrary.wiley.com"
+  ]
+ },
+ {
+  "module": "36",
+  "title": "信息检索理论与技术-字段限制检索",
+  "urls": [
+   "https://pubmed.ncbi.nlm.nih.gov/help/"
+  ]
+ },
+ {
+  "module": "37",
+  "title": "信息检索理论与技术-搜索引擎检索语法和高级搜索",
+  "urls": [
+   "https://www.baidu.com/gaoji/advanced.html",
+   "https://www.sogou.com",
+   "https://www.so.com"
+  ]
+ },
+ {
+  "module": "38",
+  "title": "知识管理工具-思维导图、笔记软件、问卷调查",
+  "urls": [
+   "https://docs.qq.com",
+   "https://www.wps.cn",
+   "https://note.youdao.com",
+   "https://www.wjx.cn"
+  ]
+ },
+ {
+  "module": "39",
+  "title": "知识管理工具-OFFICE插件和浏览器插件",
+  "urls": [
+   "https://gw.xkonglong.com",
+   "https://www.yuketang.cn",
+   "https://www.office-ai.cn",
+   "https://microsoftedge.microsoft.com/addons"
+  ]
+ },
+ {
+  "module": "40",
+  "title": "知识管理工具-截图与录屏",
+  "urls": []
+ },
+ {
+  "module": "41",
+  "title": "知识管理工具-PDF文件处理",
+  "urls": [
+   "https://www.yunzhan365.com/tools/pdf-to-word"
+  ]
+ },
+ {
+  "module": "42",
+  "title": "学术写作-学术评价与投稿选刊",
+  "urls": [
+   "https://www.nppa.gov.cn/bsfw/cyjghcpcx",
+   "https://xztg.cnki.net"
+  ]
+ },
+ {
+  "module": "43",
+  "title": "学术写作-学术伦理",
+  "urls": [
+   "https://cx.wanfangdata.com.cn/e-training"
+  ]
+ },
+ {
+  "module": "44",
+  "title": "学术写作-参考文献著录格式",
+  "urls": []
+ },
+ {
+  "module": "45",
+  "title": "学术写作-论文排版",
+  "urls": []
+ },
+ {
+  "module": "46",
+  "title": "科研工具-文献管理工具",
+  "urls": [
+   "https://www.zotero.org",
+   "https://www.mendeley.com",
+   "https://x.cnki.net/web/search/#/down"
+  ]
+ },
+ {
+  "module": "47",
+  "title": "科研工具-文献追踪工具",
+  "urls": [
+   "https://pubmed.ncbi.nlm.nih.gov"
+  ]
+ },
+ {
+  "module": "48",
+  "title": "科研工具-数据处理工具",
+  "urls": []
+ },
+ {
+  "module": "49",
+  "title": "科研工具-数据可视化工具",
+  "urls": [
+   "https://echarts.apache.org/zh/index.html",
+   "https://www.weiciyun.com"
+  ]
+ },
+ {
+  "module": "50",
+  "title": "科研工具-文献可视化工具",
+  "urls": [
+   "https://www.citexs.com/Paperpicky",
+   "https://ai.cnki.net"
+  ]
+ }
+]

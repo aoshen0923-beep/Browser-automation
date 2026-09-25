@@ -1,0 +1,24 @@
+# Created by `quizpilot init` as quizpilot.toml in the folder you run quizpilot from.
+# The API key can also come from the DEEPSEEK_API_KEY environment variable,
+# which is safer than writing it here.
+
+[llm]
+base_url = "https://api.deepseek.com"
+# Put the exact model ID from your DeepSeek console here
+# (e.g. the ID for DeepSeek V4.1 Flash).
+model = "deepseek-chat"
+api_key = ""
+timeout = 25
+
+[browser]
+# Chrome/Edge started by `quizpilot chrome` listens here.
+cdp_url = "http://127.0.0.1:9222"
+# Dedicated profile: log in to CNKI, Doubao, CNIPA etc. once, it persists.
+profile_dir = "chrome-profile"
+
+[kb]
+path = "kb/kb.sqlite"
+downloads = "downloads"
+
+[solver]
+top_k = 8
