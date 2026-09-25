@@ -72,6 +72,8 @@ label.file input { display: none; }
 .site:first-of-type { border-top-left-radius: 10px; border-top-right-radius: 10px; }
 .site:last-child { border-bottom: 0; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
 .sites-box { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.modgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 12px; margin-top: 8px; font-size: 13px; }
+.modgrid label { display: flex; gap: 6px; align-items: flex-start; }
 .site .name { font-weight: 600; min-width: 180px; }
 .site .url { flex: 1; min-width: 160px; font-size: 13px; }
 .site button { padding: 4px 10px; font-size: 13px; }
@@ -89,6 +91,7 @@ header { flex-wrap: wrap; }
       <button class="tab active" data-view="ask">答题</button>
       <button class="tab" data-view="login">网站登录</button>
       <button class="tab" data-view="flows">操作流程</button>
+      <button class="tab" data-view="kb">知识库</button>
     </nav>
     <span class="muted" id="status">连接中…</span>
   </header>
@@ -159,6 +162,54 @@ header { flex-wrap: wrap; }
       </div>
     </div>
     <div id="flows" style="margin-top:12px"></div>
+  </section>
+
+  <section id="view-kb" hidden>
+    <div class="panel">
+      <div><b>比赛前把资料存进本地知识库，比赛时几秒出答案。</b>三个人可以按模块分工，最后在下面「和队友共享」里合并。</div>
+      <div class="muted" id="kb-stats" style="margin-top:6px"></div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <h3 style="margin:0 0 6px">1. 抓取网站</h3>
+      <div class="muted">勾选你负责的模块，工具会在专用浏览器里打开这些模块的网站并保存内容。遇到验证码会提示你。</div>
+      <div class="controls"><button id="mod-all">全选</button><button id="mod-none">全不选</button>
+        <span class="spacer"></span><button class="primary" id="crawl-go">开始抓取</button></div>
+      <div id="modules" class="modgrid"></div>
+      <div id="crawl-status" class="muted" style="margin-top:8px"></div>
+      <pre class="log" id="crawl-log" hidden></pre>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <h3 style="margin:0 0 6px">2. 保存当前页面</h3>
+      <div class="muted">很多题问"某个菜单/筛选项里有什么"。先在专用浏览器里打开那个页面并展开菜单，再点这里保存。</div>
+      <div class="controls">
+        <select id="cap-module" class="modsel"></select>
+        <input type="text" id="cap-note" placeholder="说明，例如 豆包PPT风格选项" style="flex:1;min-width:200px">
+        <button class="primary" id="cap-go">保存浏览器当前页面</button>
+      </div>
+      <div id="cap-status" class="muted"></div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <h3 style="margin:0 0 6px">3. 导入文件</h3>
+      <div class="muted">法规、标准、备赛指南等 PDF / HTML / TXT 文件。</div>
+      <div class="controls">
+        <select id="up-module" class="modsel"></select>
+        <label class="file">选择文件…<input type="file" id="up-files" multiple accept=".pdf,.html,.htm,.txt,.md,.csv"></label>
+      </div>
+      <div id="up-status" class="muted"></div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <h3 style="margin:0 0 6px">4. 和队友共享</h3>
+      <div class="muted">导出的文件包含网页、文件、操作流程和做法。队友导出的文件在这里合并，合并多少次都不会重复。</div>
+      <div class="controls">
+        <a href="/api/kb/export" download="quizpilot-kb.sqlite"><button>导出我的知识库</button></a>
+        <label class="file">合并队友的文件…<input type="file" id="merge-file" accept=".sqlite"></label>
+      </div>
+      <div id="merge-status" class="muted"></div>
+    </div>
   </section>
 </main>
 
@@ -295,6 +346,8 @@ function showView(view) {
   $("view-ask").hidden = view !== "ask";
   $("view-login").hidden = view !== "login";
   $("view-flows").hidden = view !== "flows";
+  $("view-kb").hidden = view !== "kb";
+  if (view === "kb") loadKb();
   if (view === "login") loadSites();
   if (view === "flows") { loadFlows(); pollRecording(); }
   try { localStorage.setItem("qp-view", view); } catch (e) {}
@@ -440,6 +493,85 @@ $("flows").addEventListener("click", async (e) => {
   }
 });
 
+// --- knowledge base ---------------------------------------------------------------
+let kbTimer = null, kbLoaded = false;
+function fileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+async function loadKb() {
+  let k;
+  try { k = await (await fetch("/api/kb")).json(); } catch (e) { return; }
+  $("kb-stats").textContent = `共 ${k.docs} 份资料：网页 ${k.pages} · 保存的页面 ${k.captures} · 文件 ${k.files} · 操作流程 ${k.flows} · 记住的做法 ${k.recipes}`;
+  if (!kbLoaded) {
+    // "01".."09" aren't numeric keys to JS, so objects put them after "10": sort explicitly.
+    const titles = Object.entries(k.module_titles).sort((a, b) => a[0].localeCompare(b[0]));
+    $("modules").innerHTML = titles.map(([m, t]) =>
+      `<label><input type="checkbox" value="${m}"> <span>${m} ${esc(t)} <span class="muted" data-count="${m}"></span></span></label>`).join("");
+    const opts = `<option value="">不指定模块</option>` + titles.map(([m, t]) => `<option value="${m}">${m} ${esc(t)}</option>`).join("");
+    document.querySelectorAll(".modsel").forEach((sel) => { sel.innerHTML = opts; });
+    kbLoaded = true;
+  }
+  document.querySelectorAll("[data-count]").forEach((el) => {
+    const n = k.modules[el.dataset.count];
+    el.textContent = n ? `（已存 ${n}）` : "";
+  });
+  const t = k.task;
+  if (t.total) {
+    $("crawl-status").textContent = t.running ? `抓取中… ${t.done}/${t.total}（成功 ${t.ok}）` : `完成：${t.ok}/${t.total} 个网页已保存`;
+    $("crawl-log").hidden = false;
+    $("crawl-log").textContent = t.log.join("\n");
+    $("crawl-log").scrollTop = $("crawl-log").scrollHeight;
+  }
+  $("crawl-go").disabled = t.running;
+  clearTimeout(kbTimer);
+  if (t.running) kbTimer = setTimeout(loadKb, 1000);
+}
+$("mod-all").addEventListener("click", () => document.querySelectorAll("#modules input").forEach((c) => { c.checked = true; }));
+$("mod-none").addEventListener("click", () => document.querySelectorAll("#modules input").forEach((c) => { c.checked = false; }));
+$("crawl-go").addEventListener("click", async () => {
+  const modules = [...document.querySelectorAll("#modules input:checked")].map((c) => c.value);
+  if (!modules.length) { alert("请先勾选模块"); return; }
+  try { await api("/api/kb/crawl", {modules}); } catch (e) { alert("开始失败：" + e.message); }
+  loadKb();
+});
+$("cap-go").addEventListener("click", async () => {
+  $("cap-status").textContent = "保存中…";
+  try {
+    const r = await api("/api/kb/capture", {module: $("cap-module").value, note: $("cap-note").value});
+    $("cap-status").textContent = "已保存：" + r.result;
+    $("cap-note").value = "";
+  } catch (e) { $("cap-status").textContent = "保存失败：" + e.message; }
+  loadKb();
+});
+$("up-files").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  let ok = 0;
+  for (const f of files) {
+    $("up-status").textContent = `导入中… ${f.name}`;
+    try { await api("/api/kb/upload", {name: f.name, data: await fileBase64(f), module: $("up-module").value}); ok++; }
+    catch (err) { alert(`${f.name} 导入失败：${err.message}`); }
+  }
+  $("up-status").textContent = `已导入 ${ok}/${files.length} 个文件`;
+  e.target.value = "";
+  loadKb();
+});
+$("merge-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  $("merge-status").textContent = "合并中…";
+  try {
+    const r = await api("/api/kb/merge", {data: await fileBase64(f)});
+    $("merge-status").textContent = `合并完成：新增 ${r.added}，更新 ${r.updated}，保持不变 ${r.kept}`;
+  } catch (err) { $("merge-status").textContent = "合并失败：" + err.message; }
+  e.target.value = "";
+  loadKb();
+});
+
 function beep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -453,7 +585,7 @@ function beep() {
 
 setInterval(() => { for (const id of running) refresh(id); }, 800);
 init();
-try { const v = localStorage.getItem("qp-view"); if (v === "login" || v === "flows") showView(v); } catch (e) {}
+try { const v = localStorage.getItem("qp-view"); if (["login", "flows", "kb"].includes(v)) showView(v); } catch (e) {}
 $("q").focus();
 </script>
 </body>

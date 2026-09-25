@@ -17,6 +17,7 @@ import webbrowser
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from pathlib import Path
 
 from . import __version__
 from .question import Question, parse_question
@@ -99,6 +100,7 @@ class App:
 
         self.logins = Logins(cfg.resolve(STATE_NAME))
         self.recorder = None
+        self.kb_task: dict = {"running": False, "done": 0, "ok": 0, "total": 0, "log": []}
 
     # --- jobs ----------------------------------------------------------------------
 
@@ -221,6 +223,49 @@ class App:
         end = await replay(browser.context, page, flow, params, log=lambda *_: None)
         return end.url
 
+    # --- knowledge base (prep without the terminal) --------------------------------
+
+    def kb_task_state(self) -> dict:
+        return dict(self.kb_task)
+
+    async def crawl_modules(self, modules: set[str]) -> None:
+        jobs = [(s["module"], u) for s in self.sites if s["module"] in modules for u in s["urls"]]
+        t = self.kb_task = {"running": True, "done": 0, "ok": 0, "total": len(jobs), "log": []}
+        try:
+            browser = await self._get_browser()
+            sem = asyncio.Semaphore(3)
+            downloads = self.cfg.resolve(self.cfg.kb.downloads)
+
+            async def one(module: str, url: str) -> None:
+                async with sem:
+                    line = await browser.fetch_into_kb(url, self.kb, module=module, downloads=downloads)
+                    t["done"] += 1
+                    t["ok"] += line.startswith("ok")
+                    t["log"].append(f"[{module}] {line}")
+
+            await asyncio.gather(*(one(m, u) for m, u in jobs))
+        except Exception as e:
+            t["log"].append(f"出错：{type(e).__name__}: {e}")
+        finally:
+            t["running"] = False
+
+    async def capture(self, module: str, note: str) -> str:
+        browser = await self._get_browser()
+        return await browser.capture_active(self.kb, module=module, note=note)
+
+    def ingest_upload(self, name: str, data: bytes, module: str) -> str:
+        from pathlib import Path as _Path
+
+        from .ingest import ingest_file
+
+        folder = self.cfg.resolve(self.cfg.kb.downloads) / "uploads"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / _Path(name).name
+        path.write_bytes(data)
+        if ingest_file(self.kb, path, module=module) is None:
+            raise ValueError("只支持 PDF、HTML、TXT、MD、CSV 文件")
+        return path.name
+
     async def open_for_login(self, url: str) -> None:
         """Open a site in the dedicated browser, in front, for you to log in."""
         browser = await self._get_browser()
@@ -259,6 +304,21 @@ class App:
                         "live_available": app.live_available,
                         "rounds": {k: {"gain": v[0], "loss": v[1], "budget": LIVE_BUDGET[k]} for k, v in ROUNDS.items()},
                     })
+                if self.path == "/api/kb":
+                    return self._json({**app.kb.overview(), "task": app.kb_task_state(),
+                                       "module_titles": {x["module"]: x["title"] for x in app.sites}})
+                if self.path == "/api/kb/export":
+                    import tempfile
+
+                    with tempfile.TemporaryDirectory() as d:
+                        data = app.kb.export(Path(d) / "kb.sqlite").read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Disposition", 'attachment; filename="quizpilot-kb.sqlite"')
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return None
                 if self.path == "/api/flows":
                     return self._json([app.flow_dict(f) for f in app.kb.flows()])
                 if self.path == "/api/flows/recording":
@@ -284,6 +344,8 @@ class App:
                     return self._logins(self.path.rsplit("/", 1)[-1])
                 if self.path.startswith("/api/flows/"):
                     return self._flows(self.path.rsplit("/", 1)[-1])
+                if self.path.startswith("/api/kb/"):
+                    return self._kb(self.path.rsplit("/", 1)[-1])
                 if self.path != "/api/ask":
                     return self._json({"error": "not found"}, 404)
                 try:
@@ -298,6 +360,41 @@ class App:
                 except Exception as e:
                     return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
                 return self._json({"id": job.id, "kind": job.q.kind, "options": len(job.q.options)})
+
+            def _kb(self, action: str):
+                import base64
+                import tempfile
+
+                try:
+                    data = self._body()
+                    if action == "crawl":
+                        if not app.live_available:
+                            return self._json({"error": "浏览器功能已关闭（--no-live）"}, 400)
+                        if app.kb_task.get("running"):
+                            return self._json({"error": "已经在抓取中"}, 400)
+                        modules = {str(m).zfill(2) for m in data.get("modules", [])}
+                        if not modules:
+                            return self._json({"error": "请先选择模块"}, 400)
+                        asyncio.run_coroutine_threadsafe(app.crawl_modules(modules), app.loop)
+                        return self._json({"ok": True})
+                    if action == "capture":
+                        fut = asyncio.run_coroutine_threadsafe(
+                            app.capture(str(data.get("module", "")).zfill(2) if data.get("module") else "", str(data.get("note", ""))),
+                            app.loop)
+                        return self._json({"result": fut.result(timeout=30)})
+                    if action == "upload":
+                        name = app.ingest_upload(str(data["name"]), base64.b64decode(data["data"]),
+                                                 str(data.get("module", "")).zfill(2) if data.get("module") else "")
+                        return self._json({"added": name})
+                    if action == "merge":
+                        with tempfile.TemporaryDirectory() as d:
+                            path = Path(d) / "mate.sqlite"
+                            path.write_bytes(base64.b64decode(data["data"]))
+                            counts = app.kb.merge_from(path)
+                        return self._json(counts)
+                except Exception as e:
+                    return self._json({"error": f"{type(e).__name__}: {e}"}, 400)
+                return self._json({"error": "not found"}, 404)
 
             def _flows(self, action: str):
                 try:

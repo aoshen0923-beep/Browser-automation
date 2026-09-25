@@ -98,6 +98,11 @@ with one wrong option ruled out is worth answering.
 
 ## Prep workflow
 
+Everything below can also be done from the answering page's **知识库** tab,
+without the terminal: pick modules to crawl (progress is shown live), save
+the page currently open in the dedicated browser, import PDF/HTML/TXT files,
+export your knowledge base and merge a teammate's.
+
 ```powershell
 quizpilot chrome
 ```

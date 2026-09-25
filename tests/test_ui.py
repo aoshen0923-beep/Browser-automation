@@ -1,3 +1,4 @@
+import asyncio
 import json
 import threading
 import time
@@ -141,3 +142,55 @@ def test_record_and_run_a_flow_from_the_page(chrome, tmp_path):  # noqa: F811
         app.loop.call_soon_threadsafe(app.loop.stop)
         t.join(10)
     server.shutdown()
+
+
+def test_knowledge_base_tab_end_to_end(std_site, chrome, tmp_path):  # noqa: F811
+    import base64
+
+    import pymupdf
+
+    cfg = Config(root=tmp_path)
+    cfg.browser.cdp_url = chrome
+    sites = [{"module": "11", "title": "标准", "urls": [std_site + "/index.html", std_site + "/std.pdf"], "keywords": ""},
+             {"module": "12", "title": "专利", "urls": [std_site + "/results.html"], "keywords": ""}]
+    with KB(tmp_path / "kb.sqlite") as kb:
+        app = App(cfg, kb, Model(), sites)
+        t = threading.Thread(target=app.serve, kwargs={"port": 0, "open_browser": False}, daemon=True)
+        t.start()
+        while not app.url:
+            time.sleep(0.1)
+        base = app.url.rstrip("/")
+        info = call(base + "/api/kb")
+        assert info["docs"] == 0 and info["module_titles"] == {"11": "标准", "12": "专利"}
+
+        assert call(base + "/api/kb/crawl", {"modules": ["11"]}) == {"ok": True}
+        for _ in range(100):
+            info = call(base + "/api/kb")
+            if not info["task"]["running"] and info["task"]["total"]:
+                break
+            time.sleep(0.2)
+        assert info["task"]["ok"] == 2 and info["task"]["total"] == 2, info["task"]
+        assert info["modules"] == {"11": 2}
+
+        # Save whatever the dedicated browser shows.
+        page = asyncio.run_coroutine_threadsafe(app._browser.context.new_page(), app.loop).result(10)
+        asyncio.run_coroutine_threadsafe(page.goto(std_site + "/results.html"), app.loop).result(10)
+        cap = call(base + "/api/kb/capture", {"module": "12", "note": "结果页"})
+        assert cap["result"].startswith("captured")
+
+        doc = pymupdf.open()
+        doc.new_page().insert_text((72, 72), "uploaded regulation text")
+        up = call(base + "/api/kb/upload", {"name": "reg.pdf", "data": base64.b64encode(doc.tobytes()).decode(), "module": "1"})
+        assert up == {"added": "reg.pdf"}
+        info = call(base + "/api/kb")
+        assert info["captures"] == 1 and info["files"] >= 2 and info["modules"]["01"] == 1
+
+        exported = urllib.request.urlopen(base + "/api/kb/export", timeout=10).read()
+        assert exported[:15] == b"SQLite format 3"
+        with KB(tmp_path / "mate.sqlite") as mate:
+            mate.add_document("mate-doc", [(None, "队友的资料")], title="队友")
+            mate.export(tmp_path / "mate-export.sqlite")
+        merged = call(base + "/api/kb/merge", {"data": base64.b64encode((tmp_path / "mate-export.sqlite").read_bytes()).decode()})
+        assert merged == {"added": 1, "updated": 0, "kept": 0}
+        app.loop.call_soon_threadsafe(app.loop.stop)
+        t.join(10)
