@@ -54,7 +54,10 @@ class KB:
         self.path = Path(path)
         if str(path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path))
+        # The CLI runs lookups on a worker thread (asyncio.to_thread) while the
+        # browser drives the event loop; calls never overlap, so sharing the
+        # connection across threads is safe.
+        self.db = sqlite3.connect(str(path), check_same_thread=False)
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(_SCHEMA)
 

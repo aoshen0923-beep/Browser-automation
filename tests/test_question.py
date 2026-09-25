@@ -102,3 +102,30 @@ def test_interactive_ask_reads_pasted_lines(monkeypatch, capsys):
     assert len(seen) == 1 and seen[0].options["C"] == "许伟民"
     assert "-> single, 4 options" in out and "C    confidence 0.90" in out
     assert "(input closed - exiting)" in out
+
+
+def test_ask_and_eval_run_the_real_solver(monkeypatch, capsys, tmp_path):
+    """End to end through the CLI with the real KB and solver, fake model only."""
+    from quizpilot import cli
+
+    class Model:
+        def chat_json(self, system, user, max_tokens=700):
+            assert "李桂梅" in user  # evidence from the KB reached the prompt
+            return {"answer": "C", "confidence": 0.9, "citations": [1]}
+
+    kb_path = tmp_path / "kb.sqlite"
+    from quizpilot.kb import KB
+
+    with KB(kb_path) as kb:
+        kb.add_document("std", [(2, "本标准主要起草人：高尚荣、李桂梅、李建全。")], title="儿童口罩技术规范")
+    monkeypatch.setattr(cli, "_model", lambda cfg: Model())
+    monkeypatch.setattr(cli, "_open_kb", lambda cfg: KB(kb_path))
+    q = "《儿童口罩技术规范》以下哪一位不是起草人？ A、高尚荣 B、李桂梅 C、许伟民 D、李建全"
+    assert cli.main(["ask", q]) == 0
+    assert "C    confidence 0.90" in capsys.readouterr().out
+
+    practice = tmp_path / "p.txt"
+    practice.write_text("# 模块11（单选题）\n" + q + "\n正确答案：C\n", encoding="utf-8")
+    assert cli.main(["eval", str(practice)]) == 0
+    out = capsys.readouterr().out
+    assert "1/1 correct" in out and "[11]" in out
