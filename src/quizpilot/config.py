@@ -67,4 +67,8 @@ def load_config(path: Path | None = None) -> Config:
     cfg.llm.base_url = env.get("QUIZPILOT_BASE_URL", cfg.llm.base_url)
     cfg.llm.model = env.get("QUIZPILOT_MODEL", cfg.llm.model)
     cfg.browser.cdp_url = env.get("QUIZPILOT_CDP_URL", cfg.browser.cdp_url)
+    cfg.llm.model = cfg.llm.model.strip()
+    if "deepseek.com" in cfg.llm.base_url:
+        # DeepSeek model names are all lowercase; "Deepseek-Flash" is rejected.
+        cfg.llm.model = cfg.llm.model.lower()
     return cfg
