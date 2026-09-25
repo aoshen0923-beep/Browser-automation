@@ -125,3 +125,24 @@ def test_more_chinese_challenge_pages_are_recognized():
     assert looks_like_challenge("访问过于频繁，请稍后再试", [])
     assert looks_like_challenge("请拖动下方拼图完成验证", [])
     assert looks_like_challenge("正常页面" * 300, ["https://c.dun.163.com/api/v2/get"])
+
+
+def test_goto_survives_sites_that_abort_their_first_navigation(site, chrome):
+    # e.g. ScienceDirect LeapSpace: "net::ERR_ABORTED; maybe frame was detached?"
+    from quizpilot.browser import goto
+
+    async def run():
+        async with Browser(chrome) as b:
+            page = await b.context.new_page()
+            await page.route("**/leapspace/", lambda route: route.fulfill(status=204))
+            assert await goto(page, site + "/leapspace/", 10000) is None
+            await page.route("**/sso", lambda route: route.abort("aborted"))
+            assert await goto(page, site + "/sso", 10000) is None
+            # The tab is still usable afterwards.
+            resp = await goto(page, site + "/index.html", 10000)
+            assert resp is not None and "高级检索" in await page.content()
+            # A site that is really down still reports the failure.
+            with pytest.raises(Exception):
+                await goto(page, f"http://127.0.0.1:{_free_port()}/", 10000)
+
+    asyncio.run(run())

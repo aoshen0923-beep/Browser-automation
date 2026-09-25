@@ -60,6 +60,35 @@ def alert(message: str) -> None:
             pass
 
 
+# Errors Chrome reports when a site replaces its own first navigation, e.g.
+# ScienceDirect redirecting to its sign-in host or a JS redirect firing
+# before DOMContentLoaded. The tab is fine; it just ended up elsewhere.
+_REDIRECTED = ("net::ERR_ABORTED", "frame was detached", "interrupted by another navigation",
+               "Navigation failed because page was closed", "ERR_BLOCKED_BY_RESPONSE")
+
+
+def navigation_redirected(error: Exception) -> bool:
+    return any(marker in str(error) for marker in _REDIRECTED)
+
+
+async def goto(page: Page, url: str, timeout_ms: int = 30000):
+    """page.goto that survives sites redirecting away mid-load.
+
+    Returns the response, or None when the navigation was replaced; in that
+    case it waits briefly for whatever page the site went to instead.
+    """
+    try:
+        return await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+    except Exception as e:
+        if page.is_closed() or not navigation_redirected(e):
+            raise
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=min(timeout_ms, 15000))
+    except Exception:
+        pass
+    return None
+
+
 async def page_blocked(page: Page) -> bool:
     try:
         text = await page.evaluate("() => (document.body && document.body.innerText || '').slice(0, 4000)")

@@ -21,6 +21,8 @@ from dataclasses import asdict, dataclass, field
 
 from playwright.async_api import BrowserContext, Page
 
+from .browser import goto
+
 # Injected into every frame of the recording tab. Reports user actions to
 # Python through the exposed __qpRecord binding.
 RECORDER_JS = r"""
@@ -240,7 +242,7 @@ class Recorder:
         await self._instrument(self.page)
         self.context.on("page", self._on_new_page)
         await self.page.bring_to_front()
-        await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await goto(self.page, url)
         return self.page
 
     def _on_new_page(self, page: Page) -> None:
@@ -353,7 +355,7 @@ async def _settle(page: Page) -> None:
 async def replay(context: BrowserContext, page: Page, flow: Flow, params: dict | None = None, log=print) -> Page:
     """Run a recorded flow with new parameter values; return the page it ends on."""
     params = {str(k): str(v) for k, v in (params or {}).items()}
-    await page.goto(flow.start_url, wait_until="domcontentloaded", timeout=30000)
+    await goto(page, flow.start_url)
     await _settle(page)
     for i, step in enumerate(flow.steps, 1):
         kind = step["kind"]

@@ -20,7 +20,7 @@ from urllib.parse import quote_plus, urljoin
 from playwright.async_api import Page
 
 from . import pdftools
-from .browser import BLOCKED_RESOURCES, Browser, page_blocked, wait_for_human
+from .browser import BLOCKED_RESOURCES, Browser, goto, page_blocked, wait_for_human
 from .kb import KB
 from .llm import ChatModel, LLMError, VisionUnsupported
 from .question import JUDGE, MULTI, SINGLE, Question
@@ -309,7 +309,7 @@ class Agent:
             url = str(a.get("url", "")).strip()
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
-            resp = await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            resp = await goto(page, url, 20000)
             ctype = (resp.headers.get("content-type", "") if resp else "").lower()
             if "pdf" in ctype:
                 return await self.read_pdf({"url": url})
@@ -319,7 +319,7 @@ class Agent:
             q = quote_plus(str(a.get("query", "")))
             engine = str(a.get("engine", "bing")).lower()
             url = f"https://www.baidu.com/s?wd={q}" if engine == "baidu" else f"https://cn.bing.com/search?q={q}"
-            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            await goto(page, url, 20000)
             await self._settle()
             return "已搜索"
         if kind == "click":

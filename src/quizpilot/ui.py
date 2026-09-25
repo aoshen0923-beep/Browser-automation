@@ -266,10 +266,18 @@ class App:
 
     async def open_for_login(self, url: str) -> None:
         """Open a site in the dedicated browser, in front, for you to log in."""
+        from .browser import goto
+
         browser = await self._get_browser()
         page = await browser.context.new_page()
         await page.bring_to_front()
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        try:
+            await goto(page, url)
+        except Exception as e:
+            # Slow or unusual sites: the tab is open in front anyway, so let the
+            # person carry on logging in there instead of reporting a failure.
+            if "Timeout" not in type(e).__name__ and "timeout" not in str(e).lower():
+                raise
 
     # --- server --------------------------------------------------------------------
 
