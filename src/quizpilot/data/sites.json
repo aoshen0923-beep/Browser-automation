@@ -4,7 +4,8 @@
   "title": "AI素养-AI基础知识与伦理规范",
   "urls": [
    "https://unesdoc.unesco.org/ark:/48223/pf0000391105"
-  ]
+  ],
+  "keywords": "伦理 法规 暂行办法 生成式人工智能 UNESCO 教科文 能力框架 欧盟人工智能法 诚信"
  },
  {
   "module": "02",
@@ -13,7 +14,8 @@
    "https://www.lib.szu.edu.cn/learning/ai",
    "https://zh.d2l.ai",
    "https://www.elementsofai.com"
-  ]
+  ],
+  "keywords": "AI学习 学习路线 AI大学堂 昇腾 动手学深度学习 Elements of AI 专题网页"
  },
  {
   "module": "03",
@@ -28,7 +30,8 @@
    "https://xinghuo.xfyun.cn",
    "https://yiyan.baidu.com",
    "https://www.n.cn"
-  ]
+  ],
+  "keywords": "DeepSeek 豆包 元宝 智谱清言 通义 千问 Kimi 讯飞星火 文心 纳米AI"
  },
  {
   "module": "04",
@@ -38,7 +41,8 @@
    "https://www.qianwen.com",
    "https://www.doubao.com",
    "https://chatglm.cn"
-  ]
+  ],
+  "keywords": "PPT 写作 数据分析 会议记录"
  },
  {
   "module": "05",
@@ -50,7 +54,8 @@
    "https://paper.iflytek.com",
    "https://metaso.cn",
    "https://www.aminer.cn"
-  ]
+  ],
+  "keywords": "LeapSpace CNKI AI 星火科研助手 秘塔 AMiner Claim Radar Deep Research Trust Card"
  },
  {
   "module": "06",
@@ -60,7 +65,8 @@
    "https://chatglm.cn",
    "https://tongyi.aliyun.com/wanxiang/",
    "https://klingai.com"
-  ]
+  ],
+  "keywords": "图像生成 视频生成 音乐生成 万相 可灵 数字人"
  },
  {
   "module": "07",
@@ -77,7 +83,8 @@
    "https://www.openml.org",
    "https://archive.ics.uci.edu",
    "https://archive-beta.ics.uci.edu"
-  ]
+  ],
+  "keywords": "GitHub ModelScope 魔搭 飞桨 AI Studio 数据集 开源 License 许可证 天池 OpenML UCI"
  },
  {
   "module": "08",
@@ -86,7 +93,8 @@
    "http://jhsjk.people.cn",
    "https://www.12371.cn",
    "https://xhsz.news.cn"
-  ]
+  ],
+  "keywords": "讲话 习近平 共产党员网 思政 课程思政"
  },
  {
   "module": "09",
@@ -96,7 +104,8 @@
    "https://www.escience.org.cn/data-center",
    "https://www.scidb.cn",
    "https://data.worldbank.org"
-  ]
+  ],
+  "keywords": "统计局 统计年鉴 统计数据 开放数据 科学数据 ScienceDB 世界银行 AI知数"
  },
  {
   "module": "10",
@@ -113,7 +122,8 @@
    "http://tingshen.court.gov.cn",
    "https://wenshu.court.gov.cn",
    "https://lawpro.cnki.net/"
-  ]
+  ],
+  "keywords": "法律 法规 行政法规 规章 案例 判决 裁判文书 失信 被执行人 执行 庭审 公报"
  },
  {
   "module": "11",
@@ -127,7 +137,8 @@
    "https://www.mee.gov.cn/ywgz/fgbz/bz/",
    "https://www.mohurd.gov.cn/gongkai/fdzdgknr/bzgg/index.html",
    "https://sbj.cnipa.gov.cn/sbj/sbcx"
-  ]
+  ],
+  "keywords": "国家标准 标准 GB 起草人 行业标准 地方标准 食品安全 商标"
  },
  {
   "module": "12",
@@ -139,7 +150,8 @@
    "https://ie.espacenet.com",
    "https://patentscope2.wipo.int/search/en/search.jsf",
    "https://ggfw.cnipa.gov.cn/dlbzsq/dbQuery"
-  ]
+  ],
+  "keywords": "专利 发明专利 实用新型 申请人 地理标志 CNIPA 知识产权局 espacenet patentscope PPUBS"
  },
  {
   "module": "13",
@@ -147,7 +159,8 @@
   "urls": [
    "http://www.piyao.org.cn",
    "https://www.piyao.org.cn/pysjk/frontsql.htm"
-  ]
+  ],
+  "keywords": "辟谣 反诈 谣言"
  },
  {
   "module": "14",
@@ -156,7 +169,8 @@
    "http://www.nhc.gov.cn",
    "https://www.nmpa.gov.cn/datasearch/home-index.html",
    "https://chkd.cnki.net/ai/"
-  ]
+  ],
+  "keywords": "药品 医疗器械 化妆品 注册证 卫健委 执业 医生 CHKD"
  },
  {
   "module": "15",
@@ -167,7 +181,8 @@
    "https://www.ncss.cn",
    "https://gj.ncss.cn",
    "https://cy.ncss.cn"
-  ]
+  ],
+  "keywords": "研招 硕士 博士 招生 四六级 考试 就业 创业 国际组织"
  },
  {
   "module": "16",
@@ -180,7 +195,8 @@
    "https://cmis.cicpa.org.cn",
    "https://credit.acla.org.cn",
    "https://press.nppa.gov.cn"
-  ]
+  ],
+  "keywords": "学信网 学历 学位 证书 证券从业 基金从业 银行从业 注册会计师 律师 记者证"
  },
  {
   "module": "17",
@@ -198,7 +214,8 @@
    "https://www.icourses.cn/courseInfo?courseIndex=3&courseType=2&courseTypeId=2",
    "https://www.icourses.cn/courseInfo?courseIndex=4&courseType=1&courseTypeId=1",
    "https://open.163.com"
-  ]
+  ],
+  "keywords": "MOOC 慕课 课程 学堂在线 智慧树 学银在线 智慧教育 虚拟仿真 公开课"
  },
  {
   "module": "18",
@@ -215,7 +232,8 @@
    "https://aistudio.baidu.com",
    "https://tianchi.aliyun.com",
    "https://www.datafountain.cn"
-  ]
+  ],
+  "keywords": "讲座 大讲堂 一席 TED 知乎 B站 小红书 学习强国 和鲸 DataFountain"
  },
  {
   "module": "19",
@@ -224,7 +242,8 @@
    "https://www.cambridge.org/core",
    "https://academic.oup.com/books",
    "https://www.ncbi.nlm.nih.gov/books/"
-  ]
+  ],
+  "keywords": "电子书 剑桥 Cambridge 牛津 Oxford NCBI Bookshelf"
  },
  {
   "module": "20",
@@ -234,7 +253,8 @@
    "http://read.nlc.cn/thematDataSearch/toGujiIndex",
    "http://read.nlc.cn/specialResourse/minguoIndex",
    "https://www.loc.gov"
-  ]
+  ],
+  "keywords": "国家图书馆 古籍 民国 国会图书馆"
  },
  {
   "module": "21",
@@ -251,7 +271,8 @@
    "https://www.nature.com",
    "https://www.cell.com",
    "https://www.science.org"
-  ]
+  ],
+  "keywords": "期刊论文 CNKI 知网 万方 维普 ScienceDirect Wiley Taylor ACM ASME Nature Cell Science"
  },
  {
   "module": "22",
@@ -259,7 +280,8 @@
   "urls": [
    "https://www.ieee.org/conferences/index.html",
    "https://conf.cnki.net"
-  ]
+  ],
+  "keywords": "会议 IEEE 会议论文 征文 截止"
  },
  {
   "module": "23",
@@ -267,7 +289,8 @@
   "urls": [
    "http://www.nlc.cn",
    "https://dspace.mit.edu/handle/1721.1/7582"
-  ]
+  ],
+  "keywords": "学位论文 硕士论文 博士论文 导师 MIT Theses"
  },
  {
   "module": "24",
@@ -280,7 +303,8 @@
    "https://www.medrxiv.org",
    "https://www.ncpssd.cn",
    "https://www.modernhistory.org.cn"
-  ]
+  ],
+  "keywords": "arXiv 预印本 OA DOAJ OALIB ChinaXiv medRxiv 开放获取 报纸"
  },
  {
   "module": "25",
@@ -288,7 +312,8 @@
   "urls": [
    "http://fz.people.com.cn/skygb/sk/index.php/index/index/4541",
    "https://kd.nsfc.cn"
-  ]
+  ],
+  "keywords": "社科基金 国家社科 自然科学基金 立项 结项 项目负责人"
  },
  {
   "module": "26",
@@ -299,7 +324,8 @@
    "https://pubscholar.cn",
    "https://www.nstl.gov.cn",
    "https://www.aminer.cn"
-  ]
+  ],
+  "keywords": "百度学术 PubMed pubscholar NSTL AMiner 被引"
  },
  {
   "module": "27",
@@ -315,7 +341,8 @@
    "https://image.cnki.net/AI",
    "https://scidraw.io",
    "https://smart.servier.com"
-  ]
+  ],
+  "keywords": "图片 以图识图 图库 iconfont Unsplash Pixabay SciDraw"
  },
  {
   "module": "28",
@@ -325,7 +352,8 @@
    "http://www.hippter.com",
    "https://www.wenxianxue.cn",
    "https://ai-bot.cn"
-  ]
+  ],
+  "keywords": "网址导航 优设 HIPPTER 古典文献 AI工具集"
  },
  {
   "module": "29",
@@ -333,14 +361,16 @@
   "urls": [
    "https://index.baidu.com/v2/index.html",
    "https://trendinsight.oceanengine.com"
-  ]
+  ],
+  "keywords": "百度指数 微信指数 抖音指数 巨量算数"
  },
  {
   "module": "30",
   "title": "信息检索系统-馆藏查询系统",
   "urls": [
    "http://www.nlc.cn"
-  ]
+  ],
+  "keywords": "馆藏 索书号 图书馆 OPAC 中图分类号"
  },
  {
   "module": "31",
@@ -355,14 +385,16 @@
    "https://pubmed.ncbi.nlm.nih.gov/advanced/",
    "https://ieeexplore.ieee.org/search/advanced",
    "https://www.spiedigitallibrary.org"
-  ]
+  ],
+  "keywords": "高级检索"
  },
  {
   "module": "32",
   "title": "信息检索理论与技术-布尔逻辑检索",
   "urls": [
    "https://dl.acm.org/search/advanced"
-  ]
+  ],
+  "keywords": "布尔 AND OR NOT"
  },
  {
   "module": "33",
@@ -372,26 +404,30 @@
    "https://onlinelibrary.wiley.com/search/advanced",
    "https://dl.acm.org/search/advanced",
    "http://epub.cnipa.gov.cn/"
-  ]
+  ],
+  "keywords": "截词 通配符"
  },
  {
   "module": "34",
   "title": "信息检索理论与技术-精确与模糊匹配",
-  "urls": []
+  "urls": [],
+  "keywords": "精确匹配 模糊匹配"
  },
  {
   "module": "35",
   "title": "信息检索理论与技术-结果筛选",
   "urls": [
    "https://onlinelibrary.wiley.com"
-  ]
+  ],
+  "keywords": "筛选 结果筛选"
  },
  {
   "module": "36",
   "title": "信息检索理论与技术-字段限制检索",
   "urls": [
    "https://pubmed.ncbi.nlm.nih.gov/help/"
-  ]
+  ],
+  "keywords": "检索字段 字段"
  },
  {
   "module": "37",
@@ -400,7 +436,8 @@
    "https://www.baidu.com/gaoji/advanced.html",
    "https://www.sogou.com",
    "https://www.so.com"
-  ]
+  ],
+  "keywords": "filetype site inurl 高级搜索 搜索语法 百度 搜狗 360"
  },
  {
   "module": "38",
@@ -410,7 +447,8 @@
    "https://www.wps.cn",
    "https://note.youdao.com",
    "https://www.wjx.cn"
-  ]
+  ],
+  "keywords": "思维导图 笔记 问卷星 有道云笔记 腾讯文档 WPS"
  },
  {
   "module": "39",
@@ -420,19 +458,22 @@
    "https://www.yuketang.cn",
    "https://www.office-ai.cn",
    "https://microsoftedge.microsoft.com/addons"
-  ]
+  ],
+  "keywords": "插件 扩展 雨课堂 小恐龙 OfficeAI"
  },
  {
   "module": "40",
   "title": "知识管理工具-截图与录屏",
-  "urls": []
+  "urls": [],
+  "keywords": "截图 录屏 QQ LICEcap"
  },
  {
   "module": "41",
   "title": "知识管理工具-PDF文件处理",
   "urls": [
    "https://www.yunzhan365.com/tools/pdf-to-word"
-  ]
+  ],
+  "keywords": "PDF 云展网 PDF转Word"
  },
  {
   "module": "42",
@@ -440,24 +481,28 @@
   "urls": [
    "https://www.nppa.gov.cn/bsfw/cyjghcpcx",
    "https://xztg.cnki.net"
-  ]
+  ],
+  "keywords": "影响因子 CSSCI 北大核心 CSCD AMI 期刊真伪 投稿 选刊"
  },
  {
   "module": "43",
   "title": "学术写作-学术伦理",
   "urls": [
    "https://cx.wanfangdata.com.cn/e-training"
-  ]
+  ],
+  "keywords": "学术不端 一稿多投 学术伦理 科研诚信"
  },
  {
   "module": "44",
   "title": "学术写作-参考文献著录格式",
-  "urls": []
+  "urls": [],
+  "keywords": "参考文献 著录 GB/T 7714 APA MLA"
  },
  {
   "module": "45",
   "title": "学术写作-论文排版",
-  "urls": []
+  "urls": [],
+  "keywords": "排版 目录 页码 脚注 替换"
  },
  {
   "module": "46",
@@ -466,19 +511,22 @@
    "https://www.zotero.org",
    "https://www.mendeley.com",
    "https://x.cnki.net/web/search/#/down"
-  ]
+  ],
+  "keywords": "文献管理 Zotero Mendeley EndNote 研学"
  },
  {
   "module": "47",
   "title": "科研工具-文献追踪工具",
   "urls": [
    "https://pubmed.ncbi.nlm.nih.gov"
-  ]
+  ],
+  "keywords": "RSS 订阅 文献追踪 alert"
  },
  {
   "module": "48",
   "title": "科研工具-数据处理工具",
-  "urls": []
+  "urls": [],
+  "keywords": "Excel 函数 VLOOKUP COUNTIF"
  },
  {
   "module": "49",
@@ -486,7 +534,8 @@
   "urls": [
    "https://echarts.apache.org/zh/index.html",
    "https://www.weiciyun.com"
-  ]
+  ],
+  "keywords": "ECharts 词云 微词云 可视化"
  },
  {
   "module": "50",
@@ -494,6 +543,7 @@
   "urls": [
    "https://www.citexs.com/Paperpicky",
    "https://ai.cnki.net"
-  ]
+  ],
+  "keywords": "CiteSpace VOSviewer 赛特新思 文献可视化 计量分析"
  }
 ]

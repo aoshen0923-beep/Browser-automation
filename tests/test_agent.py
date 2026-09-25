@@ -116,3 +116,50 @@ def test_site_directory_lists_urls():
     text = site_directory([{"module": "11", "title": "标准", "urls": ["https://a", "https://b"]},
                            {"module": "40", "title": "截图", "urls": []}])
     assert text == "11 标准: https://a https://b"
+
+
+def test_model_timeouts_do_not_crash_the_run(std_site, chrome):  # noqa: F811
+    from quizpilot.llm import LLMError
+
+    class Flaky:
+        calls = 0
+
+        def chat_json(self, system, user, max_tokens=700):
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise LLMError("request failed: The read operation timed out")
+            if "主要起草人" in user:
+                return {"action": "answer", "answer": "C", "confidence": 0.9}
+            if "共2页" in user:
+                return {"action": "pdf", "page": 2}
+            return {"action": "goto", "url": std_site + "/std.pdf"}
+
+    class Dead:
+        def chat_json(self, system, user, max_tokens=700):
+            raise LLMError("request failed: The read operation timed out")
+
+    async def run(model):
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, model, [], None, log=lambda *_: None)
+            return await agent.run(parse_question(QUESTION, "single"), budget=60, close=True)
+
+    result = asyncio.run(run(Flaky()))
+    assert result.answer.answer == "C", [(s.action, s.result[:80]) for s in result.steps]
+    dead = asyncio.run(run(Dead()))
+    assert dead.answer.answer == "" and dead.answer.confidence == 0.0
+
+
+def test_suggest_sites_routes_to_the_right_module():
+    from quizpilot.agent import suggest_sites
+    from quizpilot.cli import load_sites
+
+    sites = load_sites()
+
+    def top(text):
+        return suggest_sites(text, sites)[0]["module"]
+
+    assert top("国家标准《儿童口罩技术规范》（GB/T 38880-2020）的起草人") == "11"
+    assert top("小米公司的发明专利，通过国家知识产权局专利检索系统") == "12"
+    assert top("在arXiv中找到arXiv identifier为2108.09800的文献") == "24"
+    assert top("星河互联集团有限公司被列为失信被执行人") == "10"
+    assert top("在剑桥数据库中找到名为《Big Data and Global Trade Law》的电子书") == "19"

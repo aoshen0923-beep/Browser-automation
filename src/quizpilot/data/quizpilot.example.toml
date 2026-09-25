@@ -8,7 +8,7 @@ base_url = "https://api.deepseek.com"
 # 30-second individual round); deepseek-v4-pro is the larger model.
 model = "deepseek-flash"
 api_key = ""
-timeout = 25
+timeout = 60
 
 [browser]
 # Chrome/Edge started by `quizpilot chrome` listens here.

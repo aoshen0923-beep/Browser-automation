@@ -40,3 +40,27 @@ def test_request_shape_and_errors():
 def test_missing_key():
     with pytest.raises(LLMError, match="DEEPSEEK_API_KEY"):
         OpenAICompatible(LLMConfig(api_key=""))
+
+
+def test_empty_reply_is_retried_with_a_bigger_budget():
+    budgets = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        budgets.append(body["max_tokens"])
+        if len(budgets) == 1:  # all tokens spent on reasoning
+            return httpx.Response(200, json={"choices": [{"message": {"content": "", "reasoning_content": "..."}, "finish_reason": "length"}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"answer": "C"}'}, "finish_reason": "stop"}]})
+
+    client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
+    assert client.chat_json("s", "u", 400) == {"answer": "C"}
+    assert budgets[1] == budgets[0] * 3 and budgets[0] >= 1500
+
+
+def test_empty_twice_raises_clear_error():
+    def handler(request):
+        return httpx.Response(200, json={"choices": [{"message": {"content": ""}, "finish_reason": "length"}]})
+
+    client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMError, match="empty reply .*length"):
+        client.chat_json("s", "u")

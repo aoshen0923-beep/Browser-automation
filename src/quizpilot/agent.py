@@ -87,6 +87,29 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
 {directory}"""
 
 
+def suggest_sites(text: str, sites: list[dict], k: int = 3) -> list[dict]:
+    """Modules whose keywords/title best match the question (rarer words count more)."""
+    import math
+
+    from .textutil import tokens
+
+    docs = [set(tokens(s.get("keywords", "") + " " + s["title"])) for s in sites]
+    df: dict[str, int] = {}
+    for toks in docs:
+        for t in toks:
+            df[t] = df.get(t, 0) + 1
+    q = set(tokens(text))
+    scored = []
+    for s, toks in zip(sites, docs):
+        if not s["urls"]:
+            continue
+        score = sum(math.log(1 + len(sites) / df[t]) for t in q & toks)
+        if score > 0:
+            scored.append((score, s))
+    scored.sort(key=lambda x: -x[0])
+    return [s for _, s in scored[:k]]
+
+
 def site_directory(sites: list[dict]) -> str:
     return "\n".join(f"{s['module']} {s['title']}: {' '.join(s['urls'])}" for s in sites if s["urls"])
 
@@ -116,13 +139,14 @@ class Agent:
         sites: list[dict],
         kb: KB | None = None,
         *,
-        max_items: int = 120,
-        max_text: int = 3500,
+        max_items: int = 70,
+        max_text: int = 2500,
         log=print,
     ):
         self.browser = browser
         self.model = model
         self.kb = kb
+        self.sites = sites
         self.system = SYSTEM_TEMPLATE.format(actions=ACTIONS, directory=site_directory(sites))
         self.max_items = max_items
         self.max_text = max_text
@@ -323,10 +347,14 @@ class Agent:
         kind = {SINGLE: "单选题", MULTI: "多选题（2-4个正确答案）", JUDGE: "判断题（回答 对/错）"}[q.kind]
         parts = [f"题型：{kind}", f"题目：{q.stem}"]
         parts += [f"{k}、{v}" for k, v in q.options.items()]
+        hints = suggest_sites(q.stem + " " + " ".join(q.options.values()), self.sites)
+        if hints:
+            parts.append("\n根据题目，最可能用到的官方网站（优先直接 goto 这些网址，不要先用搜索引擎）：")
+            parts += [f"- 模块{s['module']} {s['title']}：{' '.join(s['urls'][:6])}" for s in hints]
         if steps:
             parts.append("\n已做的操作：")
             for i, s in enumerate(steps, 1):
-                parts.append(f"{i}. {json.dumps(s.action, ensure_ascii=False)} → {_clip(s.result, 600)}")
+                parts.append(f"{i}. {json.dumps(s.action, ensure_ascii=False)} → {_clip(s.result, 300)}")
         parts.append(f"\n当前页面：\n{observation}")
         if force:
             parts.append("\n时间到了：现在必须输出 answer 动作，给出最可能的答案。")
@@ -339,9 +367,11 @@ class Agent:
         try:
             action = await asyncio.to_thread(self.model.chat_json, self.system, prompt, 400)
         except LLMError as e:
+            self.log(f"  (model: {str(e)[:80]})")
             if "JSON" in str(e):
                 return {"action": "_invalid", "error": "上一步输出不是JSON，请只输出一个JSON动作"}
-            raise
+            # Timeouts and network hiccups: let the loop try again.
+            return {"action": "_invalid", "error": "模型请求失败，请直接给出下一步动作", "failed": True}
         return action if isinstance(action, dict) else {"action": "_invalid", "error": "输出必须是JSON对象"}
 
     async def run(self, q: Question, budget: float = 75, max_steps: int = 15, close: bool = False) -> LiveResult:
@@ -351,6 +381,7 @@ class Agent:
         steps: list[Step] = []
         observation = "（空白页，还没有打开任何网站）"
         final: dict | None = None
+        failures = 0
         try:
             for n in range(1, max_steps + 1):
                 elapsed = time.monotonic() - start
@@ -363,8 +394,13 @@ class Agent:
                     final = action
                     break
                 if action.get("action") == "_invalid":
+                    failures = failures + 1 if action.get("failed") else 0
+                    if failures >= 3:
+                        self.log("  (model unavailable - giving up on live research)")
+                        break
                     steps.append(Step({"action": "（无效输出）"}, action.get("error", "")))
                     continue
+                failures = 0
                 self.log(f"  [{n}] {_describe(action)}")
                 try:
                     result = await asyncio.wait_for(self.act(action), timeout=30)

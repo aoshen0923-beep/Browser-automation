@@ -44,11 +44,24 @@ class OpenAICompatible:
         self.client = httpx.Client(
             base_url=cfg.base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {cfg.api_key}"},
-            timeout=cfg.timeout,
+            # Reasoning models can take a while on long pages; older configs
+            # said 25s, which cut off live research mid-run.
+            timeout=max(float(cfg.timeout), 60.0),
             transport=transport,
         )
 
     def chat_json(self, system: str, user: str, max_tokens: int = 700) -> dict:
+        # Reasoning models can spend the whole token budget thinking and
+        # return empty content; retry once with a much larger budget.
+        budget = max(max_tokens, 1500)
+        for attempt in range(2):
+            content, finish = self._complete(system, user, budget)
+            if content.strip():
+                return parse_json_reply(content)
+            budget *= 3
+        raise LLMError(f"model returned an empty reply (finish_reason={finish})")
+
+    def _complete(self, system: str, user: str, max_tokens: int) -> tuple[str, str]:
         body = {
             "model": self.cfg.model,
             "messages": [
@@ -65,5 +78,5 @@ class OpenAICompatible:
             raise LLMError(f"request failed: {e}") from e
         if r.status_code != 200:
             raise LLMError(f"HTTP {r.status_code}: {r.text[:300]}")
-        content = r.json()["choices"][0]["message"].get("content") or ""
-        return parse_json_reply(content)
+        choice = r.json()["choices"][0]
+        return choice["message"].get("content") or "", str(choice.get("finish_reason"))

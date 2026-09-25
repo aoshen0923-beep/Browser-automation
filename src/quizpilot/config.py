@@ -15,7 +15,7 @@ class LLMConfig:
     base_url: str = "https://api.deepseek.com"
     model: str = "deepseek-flash"
     api_key: str = ""
-    timeout: float = 25.0
+    timeout: float = 60.0
 
 
 @dataclass
