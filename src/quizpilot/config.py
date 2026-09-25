@@ -22,6 +22,7 @@ class LLMConfig:
 class BrowserConfig:
     cdp_url: str = "http://127.0.0.1:9222"
     profile_dir: str = "chrome-profile"
+    executable: str = ""  # path to chrome.exe / msedge.exe; empty = find automatically
 
 
 @dataclass

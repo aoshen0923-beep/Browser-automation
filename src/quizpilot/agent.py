@@ -142,12 +142,17 @@ class Agent:
         max_items: int = 70,
         max_text: int = 2500,
         log=print,
+        logged_in: list[dict] | None = None,
     ):
         self.browser = browser
         self.model = model
         self.kb = kb
         self.sites = sites
         self.system = SYSTEM_TEMPLATE.format(actions=ACTIONS, directory=site_directory(sites))
+        if logged_in:
+            self.system += "\n\n用户已在这个浏览器中登录的网站（需要账号的内容优先用这些，不用再登录）：\n" + "\n".join(
+                f"- {x['name']}: {x['url']}" for x in logged_in
+            )
         self.max_items = max_items
         self.max_text = max_text
         self.log = log

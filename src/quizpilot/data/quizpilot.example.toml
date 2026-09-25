@@ -15,6 +15,10 @@ timeout = 60
 cdp_url = "http://127.0.0.1:9222"
 # Dedicated profile: log in to CNKI, Doubao, CNIPA etc. once, it persists.
 profile_dir = "chrome-profile"
+# Which browser to use. Empty = Chrome if found, otherwise Edge. Example:
+# executable = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+# Stick to one browser: logins saved by Edge can't be read by Chrome.
+executable = ""
 
 [kb]
 path = "kb/kb.sqlite"

@@ -55,7 +55,7 @@ def cmd_init(args, cfg: Config) -> int:
 def cmd_chrome(args, cfg: Config) -> int:
     from .browser import launch_browser
 
-    launch_browser(cfg.browser.cdp_url, cfg.resolve(cfg.browser.profile_dir), args.exe)
+    launch_browser(cfg.browser.cdp_url, cfg.resolve(cfg.browser.profile_dir), args.exe or cfg.browser.executable or None)
     print(
         f"Chrome started with remote debugging at {cfg.browser.cdp_url}.\n"
         "Log in to the sites you need in THIS window (CNKI, Doubao, CNIPA, LeapSpace, ...).\n"
@@ -368,7 +368,7 @@ def cmd_ask(args, cfg: Config) -> int:
         if args.live:
             from .browser import ensure_chrome
 
-            if not ensure_chrome(cfg.browser.cdp_url, cfg.resolve(cfg.browser.profile_dir)):
+            if not ensure_chrome(cfg.browser.cdp_url, cfg.resolve(cfg.browser.profile_dir), executable=cfg.browser.executable):
                 raise RuntimeError(f"Can't start Chrome at {cfg.browser.cdp_url}. Try `quizpilot chrome`.")
             browser = Browser(cfg.browser.cdp_url)
             runner.run(browser.__aenter__())

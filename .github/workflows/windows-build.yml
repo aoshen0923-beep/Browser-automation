@@ -103,6 +103,8 @@ jobs:
           }
           if (-not $ok) { throw "answering page did not start" }
           Write-Host "status: $($st | ConvertTo-Json -Compress)"
+          $sites = Invoke-RestMethod http://127.0.0.1:8799/api/logins
+          if ($sites.Count -lt 100) { throw "login site list missing: $($sites.Count)" }
           $html = (Invoke-WebRequest http://127.0.0.1:8799/ -UseBasicParsing).Content
           if ($html -notmatch "quizpilot") { throw "page not served" }
           $body = @{ question = "《儿童口罩技术规范》以下哪一位不是起草人？`nA、高尚荣`nB、李桂梅`nC、许伟民`nD、李建全"; round = "team"; live = $false } | ConvertTo-Json

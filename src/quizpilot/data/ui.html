@@ -58,6 +58,24 @@ a { color: var(--accent); overflow-wrap: anywhere; }
   border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; vertical-align: -1px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .err { color: var(--bad); }
+.tabs { display: flex; gap: 4px; }
+.tab { padding: 4px 12px; border-radius: 999px; }
+.tab.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+input[type=text], input[type=search] { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--text); min-width: 0; }
+label.file { border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+label.file input { display: none; }
+.group { margin-top: 16px; }
+.group h2 { font-size: 15px; margin: 0 0 6px; }
+.site { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+.site:first-of-type { border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.site:last-child { border-bottom: 0; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
+.sites-box { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.site .name { font-weight: 600; min-width: 180px; }
+.site .url { flex: 1; min-width: 160px; font-size: 13px; }
+.site button { padding: 4px 10px; font-size: 13px; }
+header { flex-wrap: wrap; }
 .captcha { background: var(--skip-bg); color: var(--skip); border-radius: 8px; padding: 8px 12px;
   font-weight: 600; margin-bottom: 10px; }
 @media (max-width: 600px) { .big { font-size: 24px; } }
@@ -66,10 +84,15 @@ a { color: var(--accent); overflow-wrap: anywhere; }
 <body>
 <main>
   <header>
-    <h1>quizpilot 答题</h1>
+    <h1>quizpilot</h1>
+    <nav class="tabs">
+      <button class="tab active" data-view="ask">答题</button>
+      <button class="tab" data-view="login">网站登录</button>
+    </nav>
     <span class="muted" id="status">连接中…</span>
   </header>
 
+  <section id="view-ask">
   <div class="panel">
     <textarea id="q" placeholder="把题目连同 A–D 选项粘贴到这里，然后按「开始答题」或 Ctrl+Enter"></textarea>
     <div class="controls">
@@ -88,6 +111,31 @@ a { color: var(--accent); overflow-wrap: anywhere; }
   </div>
 
   <div id="jobs"></div>
+  </section>
+
+  <section id="view-login" hidden>
+    <div class="panel">
+      <div>在这里打开网站，在弹出的浏览器窗口里登录，然后回来点「标记已登录」。
+        登录状态由那个浏览器保存，<b>下次打开不用再登录</b>；查找答案时会优先使用已登录的网站。</div>
+      <div class="controls">
+        <label><input type="checkbox" id="only-login" checked> 只显示需要登录的</label>
+        <input type="search" id="site-filter" placeholder="搜索网站…">
+        <span class="spacer"></span>
+        <span class="muted" id="login-count"></span>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <div class="controls" style="margin-top:0">
+        <b>添加新网站</b>
+        <input type="text" id="add-name" placeholder="名称，例如 学校图书馆">
+        <input type="text" id="add-url" placeholder="网址，例如 lib.xxx.edu.cn">
+        <button id="add-site">添加</button>
+        <span class="spacer"></span>
+        <label class="file">导入书签文件（.html）<input type="file" id="import-file" accept=".html,.htm"></label>
+      </div>
+    </div>
+    <div id="sites"></div>
+  </section>
 </main>
 
 <script>
@@ -216,6 +264,91 @@ async function refresh(id) {
   if (j.status === "done") running.delete(id);
 }
 
+// --- tabs ---------------------------------------------------------------------
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));
+function showView(view) {
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
+  $("view-ask").hidden = view !== "ask";
+  $("view-login").hidden = view !== "login";
+  if (view === "login") loadSites();
+  try { localStorage.setItem("qp-view", view); } catch (e) {}
+}
+
+// --- site logins ---------------------------------------------------------------
+let sites = [];
+async function api(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.status);
+  return data;
+}
+async function loadSites() {
+  try { sites = await (await fetch("/api/logins")).json(); } catch (e) { sites = []; }
+  renderSites();
+}
+function renderSites() {
+  const only = $("only-login").checked;
+  const q = $("site-filter").value.trim().toLowerCase();
+  const need = sites.filter((s) => s.login);
+  $("login-count").textContent = `已登录 ${sites.filter((s) => s.logged_in).length} / 需要登录 ${need.length}`;
+  const shown = sites.filter((s) => (!only || s.login || s.logged_in) &&
+    (!q || s.name.toLowerCase().includes(q) || s.url.toLowerCase().includes(q)));
+  const groups = new Map();
+  for (const s of shown) {
+    if (!groups.has(s.group)) groups.set(s.group, []);
+    groups.get(s.group).push(s);
+  }
+  $("sites").innerHTML = [...groups].map(([g, list]) => `<div class="group"><h2>${esc(g || "其他")}</h2><div class="sites-box">` +
+    list.map((s) => `<div class="site">
+      <span class="name">${esc(s.name)}</span>
+      <a class="url" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>
+      ${s.logged_in ? `<span class="badge good">已登录</span>` : s.login ? `<span class="badge skip">未登录</span>` : `<span class="muted">一般不需要登录</span>`}
+      <button data-open="${esc(s.url)}">打开登录</button>
+      ${s.logged_in ? `<button data-mark="${esc(s.url)}" data-v="0">取消标记</button>`
+                    : `<button data-mark="${esc(s.url)}" data-v="1">标记已登录</button>`}
+    </div>`).join("") + `</div></div>`).join("") || `<p class="muted">没有匹配的网站</p>`;
+}
+$("sites").addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  b.disabled = true;
+  try {
+    if (b.dataset.open) {
+      b.textContent = "打开中…";
+      await api("/api/logins/open", {url: b.dataset.open});
+      b.textContent = "已在浏览器打开";
+    } else if (b.dataset.mark) {
+      await api("/api/logins/mark", {url: b.dataset.mark, logged_in: b.dataset.v === "1"});
+      await loadSites();
+    }
+  } catch (err) {
+    alert("操作失败：" + err.message);
+    b.disabled = false;
+  }
+});
+$("only-login").addEventListener("change", renderSites);
+$("site-filter").addEventListener("input", renderSites);
+$("add-site").addEventListener("click", async () => {
+  const url = $("add-url").value.trim();
+  if (!url) { $("add-url").focus(); return; }
+  try {
+    await api("/api/logins/add", {name: $("add-name").value, url});
+    $("add-name").value = ""; $("add-url").value = "";
+    $("site-filter").value = "";
+    await loadSites();
+  } catch (err) { alert("添加失败：" + err.message); }
+});
+$("import-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const r = await api("/api/logins/import", {html: await file.text()});
+    alert(`导入了 ${r.added} 个新网站`);
+    await loadSites();
+  } catch (err) { alert("导入失败：" + err.message); }
+  e.target.value = "";
+});
+
 function beep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -229,6 +362,7 @@ function beep() {
 
 setInterval(() => { for (const id of running) refresh(id); }, 800);
 init();
+try { if (localStorage.getItem("qp-view") === "login") showView("login"); } catch (e) {}
 $("q").focus();
 </script>
 </body>

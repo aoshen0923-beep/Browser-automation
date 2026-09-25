@@ -293,12 +293,12 @@ def chrome_reachable(cdp_url: str) -> bool:
         return False
 
 
-def ensure_chrome(cdp_url: str, profile_dir: Path, wait: float = 20.0) -> bool:
+def ensure_chrome(cdp_url: str, profile_dir: Path, wait: float = 20.0, executable: str | None = None) -> bool:
     """Start the dedicated Chrome if nothing listens on the debugging port."""
     if chrome_reachable(cdp_url):
         return True
     try:
-        launch_browser(cdp_url, profile_dir)
+        launch_browser(cdp_url, profile_dir, executable or None)
     except Exception as e:
         print(f"(could not start Chrome: {e})", flush=True)
         return False

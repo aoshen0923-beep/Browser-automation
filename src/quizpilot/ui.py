@@ -95,6 +95,9 @@ class App:
         self._browser = None
         self._browser_lock: asyncio.Lock | None = None
         self.url = ""
+        from .logins import STATE_NAME, Logins
+
+        self.logins = Logins(cfg.resolve(STATE_NAME))
 
     # --- jobs ----------------------------------------------------------------------
 
@@ -130,7 +133,7 @@ class App:
         except Exception as e:
             job.log.append(f"Chrome 未连接：{e}")
             return
-        agent = Agent(browser, self.model, self.sites, self.kb, log=job.log.append)
+        agent = Agent(browser, self.model, self.sites, self.kb, log=job.log.append, logged_in=self.logins.logged_in_sites())
         result = await agent.run(job.q, budget=job.budget)
         job.final = answer_dict(job.q, result.answer, job.round, result.urls)
 
@@ -155,12 +158,20 @@ class App:
                 except Exception:
                     pass
             ok = await asyncio.to_thread(
-                ensure_chrome, self.cfg.browser.cdp_url, self.cfg.resolve(self.cfg.browser.profile_dir)
+                ensure_chrome, self.cfg.browser.cdp_url, self.cfg.resolve(self.cfg.browser.profile_dir),
+                20.0, self.cfg.browser.executable,
             )
             if not ok:
                 raise RuntimeError("无法启动 Chrome，请先运行 quizpilot chrome")
             b = self._browser = await Browser(self.cfg.browser.cdp_url).__aenter__()
             return b
+
+    async def open_for_login(self, url: str) -> None:
+        """Open a site in the dedicated browser, in front, for you to log in."""
+        browser = await self._get_browser()
+        page = await browser.context.new_page()
+        await page.bring_to_front()
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
     # --- server --------------------------------------------------------------------
 
@@ -193,6 +204,8 @@ class App:
                         "live_available": app.live_available,
                         "rounds": {k: {"gain": v[0], "loss": v[1], "budget": LIVE_BUDGET[k]} for k, v in ROUNDS.items()},
                     })
+                if self.path == "/api/logins":
+                    return self._json(app.logins.sites())
                 if self.path == "/api/jobs":
                     return self._json([j.summary() for j in sorted(app.jobs.values(), key=lambda j: -j.id)])
                 if self.path.startswith("/api/jobs/"):
@@ -203,12 +216,17 @@ class App:
                     return self._json(job.full())
                 return self._json({"error": "not found"}, 404)
 
+            def _body(self) -> dict:
+                length = int(self.headers.get("Content-Length", "0"))
+                return json.loads(self.rfile.read(length) or b"{}")
+
             def do_POST(self):
+                if self.path.startswith("/api/logins/"):
+                    return self._logins(self.path.rsplit("/", 1)[-1])
                 if self.path != "/api/ask":
                     return self._json({"error": "not found"}, 404)
                 try:
-                    length = int(self.headers.get("Content-Length", "0"))
-                    data = json.loads(self.rfile.read(length) or b"{}")
+                    data = self._body()
                     raw = str(data.get("question", "")).strip()
                     if len(raw) < 4:
                         return self._json({"error": "题目是空的"}, 400)
@@ -219,6 +237,26 @@ class App:
                 except Exception as e:
                     return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
                 return self._json({"id": job.id, "kind": job.q.kind, "options": len(job.q.options)})
+
+            def _logins(self, action: str):
+                try:
+                    data = self._body()
+                    if action == "open":
+                        if not app.live_available:
+                            return self._json({"error": "浏览器功能已关闭（--no-live）"}, 400)
+                        fut = asyncio.run_coroutine_threadsafe(app.open_for_login(str(data["url"])), app.loop)
+                        fut.result(timeout=45)
+                        return self._json({"ok": True})
+                    if action == "mark":
+                        app.logins.mark(str(data["url"]), bool(data.get("logged_in", True)))
+                        return self._json({"ok": True})
+                    if action == "add":
+                        return self._json(app.logins.add(str(data.get("name", "")), str(data["url"])))
+                    if action == "import":
+                        return self._json({"added": app.logins.import_bookmarks(str(data.get("html", "")))})
+                except Exception as e:
+                    return self._json({"error": f"{type(e).__name__}: {e}"}, 400)
+                return self._json({"error": "not found"}, 404)
 
         return Handler
 

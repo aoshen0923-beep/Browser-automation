@@ -71,5 +71,20 @@ def test_answering_page_end_to_end(std_site, chrome, tmp_path):  # noqa: F811
             raise AssertionError("empty question accepted")
         except urllib.error.HTTPError as e:
             assert e.code == 400
+        # Website logins: open a site in the dedicated browser, mark it, persist.
+        assert any(x["url"] == "https://www.cnki.net" for x in call(base + "/api/logins"))
+        assert call(base + "/api/logins/add", {"name": "测试站", "url": std_site + "/index.html"})["group"] == "我添加的网站"
+        assert call(base + "/api/logins/open", {"url": std_site + "/index.html"}) == {"ok": True}
+        assert any(p.url.endswith("/index.html") for p in app._browser.context.pages)
+        call(base + "/api/logins/mark", {"url": std_site + "/index.html", "logged_in": True})
+        mine = [x for x in call(base + "/api/logins") if x["url"] == std_site + "/index.html"]
+        assert mine and mine[0]["logged_in"] is True
+        assert (tmp_path / "logins.json").exists()
+        # The research agent is told which sites are logged in.
+        from quizpilot.agent import Agent
+
+        agent = Agent(app._browser, Model(), [], None, logged_in=app.logins.logged_in_sites())
+        assert "测试站" in agent.system and "已在这个浏览器中登录" in agent.system
+
         app.loop.call_soon_threadsafe(app.loop.stop)
         t.join(10)

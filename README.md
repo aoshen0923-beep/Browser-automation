@@ -164,6 +164,17 @@ and watch:
 Several questions can run at once, which suits the team round. From a
 terminal the same page is `quizpilot ui`.
 
+The **网站登录** tab lists the contest sites (grouped like the bookmarks
+folder), marking the ones that need an account. Click 打开登录 to open a
+site in the dedicated browser, log in there, then click 标记已登录. The
+browser profile keeps the login for next time, and the research agent
+prefers sites you're logged in to. Add new sites there, or import a
+bookmarks file exported from Chrome or Edge.
+
+The dedicated browser is Chrome if found, otherwise Edge; both work. To
+choose, set `executable` under `[browser]` in `quizpilot.toml`. Stick to
+one: logins saved by Edge can't be read by Chrome.
+
 ## Contest mode
 
 ```powershell

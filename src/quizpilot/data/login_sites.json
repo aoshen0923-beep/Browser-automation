@@ -1,0 +1,962 @@
+[
+ {
+  "name": "01 UNESCO 文献库（学生AI能力框架）",
+  "url": "https://unesdoc.unesco.org/ark:/48223/pf0000391105",
+  "group": "1 AI 素养",
+  "login": false
+ },
+ {
+  "name": "02 深圳大学图书馆 AI 专题",
+  "url": "https://www.lib.szu.edu.cn/learning/ai",
+  "group": "1 AI 素养",
+  "login": false
+ },
+ {
+  "name": "03 DeepSeek",
+  "url": "https://chat.deepseek.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "03 豆包",
+  "url": "https://www.doubao.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "03 腾讯元宝",
+  "url": "https://yuanbao.tencent.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "03 智谱清言",
+  "url": "https://chatglm.cn",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "03 千问",
+  "url": "https://www.qianwen.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "03 Kimi",
+  "url": "https://www.kimi.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "03 讯飞星火",
+  "url": "https://xinghuo.xfyun.cn",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "03 文心",
+  "url": "https://yiyan.baidu.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "05 LeapSpace",
+  "url": "https://www.sciencedirect.com/leapspace/",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "05 LeapSpace 培训教程",
+  "url": "https://eci.elsevier.cn/resource/LeapSpace.html?fid=165&menuid=358&infoid=2004",
+  "group": "1 AI 素养",
+  "login": false
+ },
+ {
+  "name": "05 CNKI AI",
+  "url": "https://ai.cnki.net",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "05 星火科研助手",
+  "url": "https://paper.iflytek.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "05 秘塔 AI 搜索",
+  "url": "https://metaso.cn",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "05 AMiner",
+  "url": "https://www.aminer.cn",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "06 可灵 AI",
+  "url": "https://klingai.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "07 GitHub",
+  "url": "https://github.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "07 ModelScope 魔搭",
+  "url": "https://modelscope.cn",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "07 百度 AI Studio",
+  "url": "https://aistudio.baidu.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "07 和鲸 HeyWhale",
+  "url": "https://www.heywhale.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "07 阿里云天池",
+  "url": "https://tianchi.aliyun.com",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "07 DataFountain",
+  "url": "https://www.datafountain.cn",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "07 OpenDataLab",
+  "url": "https://opendatalab.com",
+  "group": "1 AI 素养",
+  "login": false
+ },
+ {
+  "name": "07 OpenML",
+  "url": "https://www.openml.org",
+  "group": "1 AI 素养",
+  "login": false
+ },
+ {
+  "name": "07 UCI（Classic）",
+  "url": "https://archive.ics.uci.edu",
+  "group": "1 AI 素养",
+  "login": false
+ },
+ {
+  "name": "07 GitHub 中文文档",
+  "url": "https://docs.github.com/zh",
+  "group": "1 AI 素养",
+  "login": true
+ },
+ {
+  "name": "08 习近平系列重要讲话数据库",
+  "url": "http://jhsjk.people.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "08 共产党员网",
+  "url": "https://www.12371.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "08 全国高校课程思政教学资源服务平台",
+  "url": "https://xhsz.news.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "09 国家统计局数据查询",
+  "url": "https://data.stats.gov.cn/dg/website/page.html#/pc/national/home",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "09 国家科学数据中心",
+  "url": "https://www.escience.org.cn/data-center",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "09 ScienceDB",
+  "url": "https://www.scidb.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "09 世界银行开放数据",
+  "url": "https://data.worldbank.org",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "09 AI 知数介绍",
+  "url": "https://mp.weixin.qq.com/s/uWR2BMvQtpuGkv9oXTZDdQ",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 国家法律法规数据库",
+  "url": "https://flk.npc.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 国家行政法规库",
+  "url": "http://xzfg.moj.gov.cn/search2.html",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 国家规章库",
+  "url": "https://www.gov.cn/zhengce/xxgk/gjgzk/index.htm",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 人民法院案例库",
+  "url": "https://rmfyalk.court.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 最高法公报",
+  "url": "http://gongbao.court.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 中国执行信息公开网",
+  "url": "http://zxgk.court.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 中国庭审公开网",
+  "url": "http://tingshen.court.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 中国裁判文书网",
+  "url": "https://wenshu.court.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "10 中国法律知识资源总库",
+  "url": "https://lawpro.cnki.net/",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "11 国家标准全文公开系统",
+  "url": "https://openstd.samr.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "11 全国标准信息公共服务平台",
+  "url": "http://std.samr.gov.cn/gb",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "11 食品安全标准",
+  "url": "http://gb2760.cfsa.net.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "11 生态环境标准",
+  "url": "https://www.mee.gov.cn/ywgz/fgbz/bz/",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "11 工程建设标准",
+  "url": "https://www.mohurd.gov.cn/gongkai/fdzdgknr/bzgg/index.html",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "11 商标查询系统",
+  "url": "https://sbj.cnipa.gov.cn/sbj/sbcx",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "12 专利公布公告",
+  "url": "http://epub.cnipa.gov.cn/",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "12 专利检索及分析",
+  "url": "https://pss-system.cponline.cnipa.gov.cn/",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "12 USPTO PPUBS",
+  "url": "https://www.uspto.gov/patents/search/patent-public-search",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "12 Espacenet",
+  "url": "https://ie.espacenet.com",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "12 PATENTSCOPE",
+  "url": "https://patentscope2.wipo.int/search/en/search.jsf",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "12 地理标志产品检索",
+  "url": "https://ggfw.cnipa.gov.cn/dlbzsq/dbQuery",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "13 中国互联网联合辟谣平台",
+  "url": "http://www.piyao.org.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "13 辟谣信息查证栏目",
+  "url": "https://www.piyao.org.cn/pysjk/frontsql.htm",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "14 国家卫健委",
+  "url": "http://www.nhc.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "14 国家药监局数据查询",
+  "url": "https://www.nmpa.gov.cn/datasearch/home-index.html",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "14 CHKD AI",
+  "url": "https://chkd.cnki.net/ai/",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "15 中国教育考试网",
+  "url": "https://www.neea.edu.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "15 研招网",
+  "url": "https://yz.chsi.com.cn",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "15 国家大学生就业服务平台",
+  "url": "https://www.ncss.cn",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "15 国际组织实习任职平台",
+  "url": "https://gj.ncss.cn",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "15 全国大学生创业服务网",
+  "url": "https://cy.ncss.cn",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "16 学信网",
+  "url": "https://www.chsi.com.cn",
+  "group": "2 政府开放信息",
+  "login": true
+ },
+ {
+  "name": "16 证券业协会",
+  "url": "https://gs.sac.net.cn/pages/registration/new-sac-publicity-org.html",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "16 基金业协会",
+  "url": "https://www.amac.org.cn/fwdt/wyc/jgcprycx/rycx",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "16 银行业协会",
+  "url": "https://www.china-cba.net/Index/lists/catid/31.html",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "16 注册会计师协会",
+  "url": "https://cmis.cicpa.org.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "16 律师执业诚信平台",
+  "url": "https://credit.acla.org.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "16 中国记者网",
+  "url": "https://press.nppa.gov.cn",
+  "group": "2 政府开放信息",
+  "login": false
+ },
+ {
+  "name": "17 中国大学 MOOC",
+  "url": "https://www.icourse163.org",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "17 学堂在线",
+  "url": "https://www.xuetangx.com",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "17 智慧树",
+  "url": "https://www.zhihuishu.com",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "17 学银在线",
+  "url": "https://www.xueyinonline.com",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "17 国家高等教育智慧教育平台",
+  "url": "https://higher.smartedu.cn",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "17 国家中小学智慧教育平台",
+  "url": "https://basic.smartedu.cn",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "17 虚拟仿真实验平台",
+  "url": "http://www.ilab-x.com",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "17 网易公开课",
+  "url": "https://open.163.com",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "18 高校信息素养教育数据库讲座",
+  "url": "https://suyang.zxhnzq.com/lecture",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "18 知网学术大讲堂",
+  "url": "https://k.cnki.net/home",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "18 万方视频",
+  "url": "https://video.wanfangdata.com.cn",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "18 学习强国",
+  "url": "https://www.xuexi.cn",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "18 一席",
+  "url": "https://www.yixi.tv",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "18 TED",
+  "url": "https://www.ted.com",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "18 知乎直答",
+  "url": "https://zhida.zhihu.com",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "19 剑桥 Core",
+  "url": "https://www.cambridge.org/core",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "19 牛津学术",
+  "url": "https://academic.oup.com/books",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "19 NCBI Bookshelf",
+  "url": "https://www.ncbi.nlm.nih.gov/books/",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "20 国家图书馆",
+  "url": "http://www.nlc.cn",
+  "group": "3 实用学习资源",
+  "login": true
+ },
+ {
+  "name": "20 中华古籍资源库",
+  "url": "http://read.nlc.cn/thematDataSearch/toGujiIndex",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "20 民国时期文献库",
+  "url": "http://read.nlc.cn/specialResourse/minguoIndex",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "20 美国国会图书馆",
+  "url": "https://www.loc.gov",
+  "group": "3 实用学习资源",
+  "login": false
+ },
+ {
+  "name": "21 CNKI",
+  "url": "https://www.cnki.net",
+  "group": "4 学术信息资源",
+  "login": true
+ },
+ {
+  "name": "21 万方",
+  "url": "https://www.wanfangdata.com.cn",
+  "group": "4 学术信息资源",
+  "login": true
+ },
+ {
+  "name": "21 维普",
+  "url": "https://www.cqvip.com",
+  "group": "4 学术信息资源",
+  "login": true
+ },
+ {
+  "name": "21 ScienceDirect",
+  "url": "https://www.sciencedirect.com",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "21 Wiley",
+  "url": "https://onlinelibrary.wiley.com",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "21 Taylor & Francis",
+  "url": "https://www.tandfonline.com",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "21 ACM DL",
+  "url": "https://dl.acm.org",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "21 Nature",
+  "url": "https://www.nature.com",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "21 Science",
+  "url": "https://www.science.org",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "21 Cell",
+  "url": "https://www.cell.com",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "22 IEEE 会议",
+  "url": "https://www.ieee.org/conferences/index.html",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "22 CNKI 中国学术会议网",
+  "url": "https://conf.cnki.net",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "24 DOAJ",
+  "url": "https://doaj.org",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "24 OALIB",
+  "url": "https://www.oalib.com",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "24 arXiv",
+  "url": "https://arxiv.org",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "24 ChinaXiv",
+  "url": "https://chinaxiv.org",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "24 medRxiv",
+  "url": "https://www.medrxiv.org",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "24 国家哲学社会科学文献中心",
+  "url": "https://www.ncpssd.cn",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "24 抗日战争与近代中日关系文献",
+  "url": "https://www.modernhistory.org.cn",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "25 国家社科基金项目数据库",
+  "url": "http://fz.people.com.cn/skygb/sk/index.php/index/index/4541",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "25 国家自然科学基金大数据知识管理服务门户",
+  "url": "https://kd.nsfc.cn",
+  "group": "4 学术信息资源",
+  "login": false
+ },
+ {
+  "name": "26 百度学术",
+  "url": "https://xueshu.baidu.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "26 PubMed",
+  "url": "https://pubmed.ncbi.nlm.nih.gov",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "26 PubScholar",
+  "url": "https://pubscholar.cn",
+  "group": "5 信息检索系统",
+  "login": true
+ },
+ {
+  "name": "26 NSTL",
+  "url": "https://www.nstl.gov.cn",
+  "group": "5 信息检索系统",
+  "login": true
+ },
+ {
+  "name": "27 百度图片",
+  "url": "https://image.baidu.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "27 搜狗图片",
+  "url": "https://pic.sogou.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "27 360 图片",
+  "url": "https://image.so.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "27 iconfont",
+  "url": "https://www.iconfont.cn",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "27 Unsplash",
+  "url": "https://unsplash.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "27 Pixabay",
+  "url": "https://pixabay.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "27 CNKI 学术图片库",
+  "url": "https://image.cnki.net/AI",
+  "group": "5 信息检索系统",
+  "login": true
+ },
+ {
+  "name": "27 SciDraw",
+  "url": "https://scidraw.io",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "27 Servier SMART",
+  "url": "https://smart.servier.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "28 优设导航",
+  "url": "https://hao.uisdc.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "28 HIPPTER",
+  "url": "http://www.hippter.com",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "28 中国古典文献资源导航（奎章阁）",
+  "url": "https://www.wenxianxue.cn",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "28 AI 工具集",
+  "url": "https://ai-bot.cn",
+  "group": "5 信息检索系统",
+  "login": false
+ },
+ {
+  "name": "29 百度指数",
+  "url": "https://index.baidu.com/v2/index.html",
+  "group": "5 信息检索系统",
+  "login": true
+ },
+ {
+  "name": "29 抖音指数（巨量算数）",
+  "url": "https://trendinsight.oceanengine.com",
+  "group": "5 信息检索系统",
+  "login": true
+ },
+ {
+  "name": "30 国家图书馆 OPAC",
+  "url": "http://opac.nlc.cn",
+  "group": "5 信息检索系统",
+  "login": true
+ },
+ {
+  "name": "31 CNKI 高级检索",
+  "url": "https://kns.cnki.net/kns8s/AdvSearch",
+  "group": "6 信息检索理论与技术",
+  "login": true
+ },
+ {
+  "name": "31 PubMed Advanced",
+  "url": "https://pubmed.ncbi.nlm.nih.gov/advanced/",
+  "group": "6 信息检索理论与技术",
+  "login": false
+ },
+ {
+  "name": "31 IEEE Xplore",
+  "url": "https://ieeexplore.ieee.org",
+  "group": "6 信息检索理论与技术",
+  "login": true
+ },
+ {
+  "name": "36 PubMed 帮助",
+  "url": "https://pubmed.ncbi.nlm.nih.gov/help/",
+  "group": "6 信息检索理论与技术",
+  "login": false
+ },
+ {
+  "name": "37 百度高级搜索",
+  "url": "https://www.baidu.com/gaoji/advanced.html",
+  "group": "6 信息检索理论与技术",
+  "login": false
+ },
+ {
+  "name": "38 腾讯文档",
+  "url": "https://docs.qq.com",
+  "group": "7 知识管理工具",
+  "login": true
+ },
+ {
+  "name": "38 WPS",
+  "url": "https://www.wps.cn",
+  "group": "7 知识管理工具",
+  "login": true
+ },
+ {
+  "name": "38 有道云笔记",
+  "url": "https://note.youdao.com",
+  "group": "7 知识管理工具",
+  "login": true
+ },
+ {
+  "name": "38 问卷星",
+  "url": "https://www.wjx.cn",
+  "group": "7 知识管理工具",
+  "login": true
+ },
+ {
+  "name": "39 小恐龙公文排版",
+  "url": "https://gw.xkonglong.com",
+  "group": "7 知识管理工具",
+  "login": false
+ },
+ {
+  "name": "39 雨课堂",
+  "url": "https://www.yuketang.cn",
+  "group": "7 知识管理工具",
+  "login": true
+ },
+ {
+  "name": "39 OfficeAI 助手",
+  "url": "https://www.office-ai.cn",
+  "group": "7 知识管理工具",
+  "login": false
+ },
+ {
+  "name": "40 LICEcap",
+  "url": "https://www.cockos.com/licecap/",
+  "group": "7 知识管理工具",
+  "login": false
+ },
+ {
+  "name": "41 云展网 PDF 工具",
+  "url": "https://www.yunzhan365.com/tools/pdf-to-word",
+  "group": "7 知识管理工具",
+  "login": false
+ },
+ {
+  "name": "42 国家新闻出版署期刊查询",
+  "url": "https://www.nppa.gov.cn/bsfw/cyjghcpcx",
+  "group": "8 学术写作",
+  "login": false
+ },
+ {
+  "name": "42 CNKI 写作投稿服务平台",
+  "url": "https://xztg.cnki.net",
+  "group": "8 学术写作",
+  "login": true
+ },
+ {
+  "name": "43 万方科研诚信培训系统",
+  "url": "https://cx.wanfangdata.com.cn/e-training",
+  "group": "8 学术写作",
+  "login": true
+ },
+ {
+  "name": "46 Zotero",
+  "url": "https://www.zotero.org",
+  "group": "9 科研工具",
+  "login": false
+ },
+ {
+  "name": "46 Mendeley",
+  "url": "https://www.mendeley.com",
+  "group": "9 科研工具",
+  "login": true
+ },
+ {
+  "name": "46 知网研学",
+  "url": "https://x.cnki.net/web/search/#/down",
+  "group": "9 科研工具",
+  "login": true
+ },
+ {
+  "name": "47 CNKI 期刊导航",
+  "url": "https://navi.cnki.net",
+  "group": "9 科研工具",
+  "login": false
+ },
+ {
+  "name": "49 ECharts",
+  "url": "https://echarts.apache.org/zh/index.html",
+  "group": "9 科研工具",
+  "login": false
+ },
+ {
+  "name": "49 微词云",
+  "url": "https://www.weiciyun.com",
+  "group": "9 科研工具",
+  "login": true
+ },
+ {
+  "name": "50 赛特新思",
+  "url": "https://www.citexs.com/Paperpicky",
+  "group": "9 科研工具",
+  "login": true
+ }
+]
