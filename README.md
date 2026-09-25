@@ -178,6 +178,25 @@ That means:
   round but pays off in the team round.
 - Blind guesses on multi-select questions don't pay off.
 
+## Live research in your browser
+
+With `--live`, quizpilot also researches in your own Chrome (start it with
+`quizpilot chrome` first). Like a person, it opens the official site from
+the guide, types into search boxes, clicks results, picks dropdown
+options, finds text on long pages and reads PDFs page by page. You can
+watch it work in the browser window.
+
+```powershell
+quizpilot ask --live --round team            # up to 75 s per question
+quizpilot ask --live --budget 40             # custom time limit
+quizpilot eval practice.txt --live --modules 11,12,24 --budget 60
+```
+
+It prints the instant local answer first, so you have a fallback while the
+browser works. Every page and PDF it reads is saved to the knowledge base,
+so questions it has researched before answer faster next time. If a site
+shows a CAPTCHA or a login page, it beeps and waits for you.
+
 ## PDF facts without guessing
 
 ```powershell
@@ -202,8 +221,6 @@ Run the tests with `pytest`.
 
 ## Roadmap
 
-- **Live research agent for the team round:** 90 seconds per question and
-  three people make live lookups worthwhile.
 - **Site adapters** that fill advanced-search forms exactly (CNKI, Wanfang,
   CQVIP, CNIPA, openstd) for result-count questions.
 - **A vision model** for "how many figures on page N" questions.

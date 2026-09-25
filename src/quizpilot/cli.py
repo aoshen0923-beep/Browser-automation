@@ -241,7 +241,7 @@ def _clipboard() -> str:
         return ""
 
 
-def _print_answer(q, ans, round_name: str) -> None:
+def _print_answer(q, ans, round_name: str, urls: list[str] | None = None, title: str = "") -> None:
     from .solver import break_even, worth_answering
 
     be = break_even(round_name)
@@ -250,6 +250,8 @@ def _print_answer(q, ans, round_name: str) -> None:
         return
     verdict = "ANSWER" if worth_answering(ans.confidence, round_name) else "SKIP (not worth the -1 risk)"
     print("\n" + "=" * 60)
+    if title:
+        print(f"  [{title}]")
     print(f"  {ans.answer or '?'}    confidence {ans.confidence:.2f}  ->  {verdict}")
     print(f"  (break-even {be:.2f} in the {round_name} round, {ans.seconds:.1f}s)")
     print("=" * 60)
@@ -260,7 +262,9 @@ def _print_answer(q, ans, round_name: str) -> None:
         print(f"  why: {ans.reason}")
     for h in ans.citations[:3]:
         print(f"  src: {h.cite()}")
-    if not ans.citations:
+    for url in (urls or [])[-3:]:
+        print(f"  web: {url}")
+    if not ans.citations and not urls:
         print("  src: none in the local KB - model knowledge only, verify if time allows")
 
 
@@ -270,59 +274,115 @@ def _model(cfg: Config):
     return OpenAICompatible(cfg.llm)
 
 
-def cmd_ask(args, cfg: Config) -> int:
-    from .question import parse_question
+LIVE_BUDGET = {"individual": 25, "team": 75}
+
+
+def _budget(args) -> float:
+    return args.budget or LIVE_BUDGET[args.round]
+
+
+async def _answer_one(q, kb, model, cfg: Config, args, browser=None) -> None:
     from .solver import solve
 
+    ans = await asyncio.to_thread(solve, q, kb, model, cfg.solver.top_k)
+    if not args.live:
+        _print_answer(q, ans, args.round)
+        return
+    # The instant local answer is a fallback you can use while the browser works.
+    _print_answer(q, ans, args.round, title="quick answer from local knowledge")
+    from .agent import Agent
+
+    print(f"\nSearching live in Chrome (up to {_budget(args):.0f}s)...")
+    agent = Agent(browser, model, load_sites(), kb)
+    result = await agent.run(q, budget=_budget(args))
+    _print_answer(q, result.answer, args.round, urls=result.urls, title="live answer from the web")
+
+
+def cmd_ask(args, cfg: Config) -> int:
+    from .browser import Browser
+    from .question import parse_question
+
     model = _model(cfg)
-    with _open_kb(cfg) as kb:
+
+    async def run() -> None:
+        with _open_kb(cfg) as kb:
+            if args.live:
+                async with Browser(cfg.browser.cdp_url) as browser:
+                    await loop(kb, browser)
+            else:
+                await loop(kb, None)
+
+    async def loop(kb, browser) -> None:
         if args.question:
             q = parse_question(" ".join(args.question), args.kind)
-            _print_answer(q, solve(q, kb, model, cfg.solver.top_k), args.round)
-            return 0
-        try:
-            while True:
-                raw = _read_question()
-                if not raw:
-                    break
-                q = parse_question(raw, args.kind)
-                print(f"-> {q.kind}, {len(q.options)} options")
-                _print_answer(q, solve(q, kb, model, cfg.solver.top_k), args.round)
-        except KeyboardInterrupt:
-            print()
+            await _answer_one(q, kb, model, cfg, args, browser)
+            return
+        while True:
+            raw = await asyncio.to_thread(_read_question)
+            if not raw:
+                break
+            q = parse_question(raw, args.kind)
+            print(f"-> {q.kind}, {len(q.options)} options")
+            await _answer_one(q, kb, model, cfg, args, browser)
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        print()
     return 0
 
 
 def cmd_eval(args, cfg: Config) -> int:
+    from .browser import Browser
     from .question import parse_question, split_questions
     from .solver import ROUNDS, solve, worth_answering
 
-    blocks = split_questions(Path(args.file).read_text(encoding="utf-8"))
+    wanted = _module_filter(args.modules)
+    questions = [parse_question(b) for b in split_questions(Path(args.file).read_text(encoding="utf-8"))]
+    questions = [q for q in questions if q.expected and (not wanted or q.module in wanted)]
+    if args.limit:
+        questions = questions[: args.limit]
     model = _model(cfg)
     gain, loss = ROUNDS[args.round]
-    correct = answered = 0
-    score = 0.0
-    seconds = []
-    with _open_kb(cfg) as kb:
-        for i, block in enumerate(blocks, 1):
-            q = parse_question(block)
-            if not q.expected:
-                continue
-            ans = solve(q, kb, model, cfg.solver.top_k)
-            seconds.append(ans.seconds)
-            ok = ans.answer == q.expected
-            correct += ok
-            if worth_answering(ans.confidence, args.round):
-                answered += 1
-                score += gain if ok else loss
-            mark = "OK " if ok else "BAD"
-            print(f"{i:3} {mark} got {ans.answer or '-':5} want {q.expected:5} conf {ans.confidence:.2f} {ans.seconds:4.1f}s  {q.stem[:40]}")
-    n = len(seconds)
+    stats = {"correct": 0, "answered": 0, "score": 0.0, "seconds": []}
+
+    def record(i, q, ans) -> None:
+        stats["seconds"].append(ans.seconds)
+        ok = ans.answer == q.expected
+        stats["correct"] += ok
+        if worth_answering(ans.confidence, args.round):
+            stats["answered"] += 1
+            stats["score"] += gain if ok else loss
+        mark = "OK " if ok else "BAD"
+        note = f"  !! {ans.error[:60]}" if ans.error else ""
+        print(
+            f"{i:3} {mark} [{q.module or '--'}] got {ans.answer or '-':5} want {q.expected:5} "
+            f"conf {ans.confidence:.2f} {ans.seconds:4.1f}s  {q.stem[:36]}{note}",
+            flush=True,
+        )
+
+    async def run() -> None:
+        with _open_kb(cfg) as kb:
+            if not args.live:
+                for i, q in enumerate(questions, 1):
+                    record(i, q, await asyncio.to_thread(solve, q, kb, model, cfg.solver.top_k))
+                return
+            from .agent import Agent
+
+            async with Browser(cfg.browser.cdp_url) as browser:
+                for i, q in enumerate(questions, 1):
+                    print(f"--- {i}/{len(questions)} [{q.module}] {q.stem[:50]}", flush=True)
+                    agent = Agent(browser, model, load_sites(), kb)
+                    result = await agent.run(q, budget=_budget(args), close=True)
+                    record(i, q, result.answer)
+
+    asyncio.run(run())
+    n = len(stats["seconds"])
     if n:
         print(
-            f"\n{correct}/{n} correct ({correct / n:.0%}); answering only when worth it: "
-            f"{answered} answered, score {score:+.0f} ({args.round} scoring); "
-            f"avg {sum(seconds) / n:.1f}s per question"
+            f"\n{stats['correct']}/{n} correct ({stats['correct'] / n:.0%}); answering only when worth it: "
+            f"{stats['answered']} answered, score {stats['score']:+.0f} ({args.round} scoring); "
+            f"avg {sum(stats['seconds']) / n:.1f}s per question"
         )
     return 0
 
@@ -400,11 +460,15 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         s = sub.add_parser(name, help=help_)
         s.add_argument("--round", choices=["individual", "team"], default="individual")
+        s.add_argument("--live", action="store_true", help="also research live in your Chrome (start it with `quizpilot chrome`)")
+        s.add_argument("--budget", type=float, help="seconds per question for --live (default 25 individual, 75 team)")
         if name == "ask":
             s.add_argument("question", nargs="*", help="question text (omit for interactive mode)")
             s.add_argument("--kind", choices=["single", "multi", "judge"], help="override the detected type")
         else:
             s.add_argument("file")
+            s.add_argument("--modules", help="only these modules, e.g. 11,12,24")
+            s.add_argument("--limit", type=int, help="only the first N questions")
         s.set_defaults(fn=fn)
 
     s = sub.add_parser("samples", help="extract the guide's sample questions into a practice file")

@@ -24,6 +24,7 @@ class Question:
     kind: str
     options: dict[str, str] = field(default_factory=dict)
     expected: str | None = None  # "ABD", "对"/"错" when the paste includes the key
+    module: str = ""  # "11" when a practice file names the module
 
     def render(self) -> str:
         lines = [f"[{self.kind}] {self.stem}"]
@@ -65,7 +66,9 @@ def normalize_judgement(value: str) -> str | None:
 
 
 def parse_question(raw: str, kind: str | None = None) -> Question:
-    text = raw.replace("\r\n", "\n").strip()
+    # Lines starting with "#" are notes in practice files (e.g. "# 模块11（单选题）").
+    module_m = re.search(r"^#.*?模块\s*(\d+)", raw, re.M)
+    text = "\n".join(ln for ln in raw.replace("\r\n", "\n").splitlines() if not ln.lstrip().startswith("#")).strip()
     expected = None
     m = _ANSWER.search(text)
     if m:
@@ -101,7 +104,8 @@ def parse_question(raw: str, kind: str | None = None) -> Question:
             expected = normalize_judgement(expected) or expected
         else:
             expected = "".join(sorted(set(re.findall(r"[A-D]", expected.upper()))))
-    return Question(stem=stem, kind=kind, options=options, expected=expected)
+    module = module_m.group(1).zfill(2) if module_m else ""
+    return Question(stem=stem, kind=kind, options=options, expected=expected, module=module)
 
 
 def split_questions(text: str) -> list[str]:
