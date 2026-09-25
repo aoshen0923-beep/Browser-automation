@@ -44,3 +44,32 @@ def test_explicit_kind_wins():
 
 def test_split_questions():
     assert split_questions("q1\n---\nq2\n\n----\n") == ["q1", "q2"]
+
+
+def test_crawl_job_selection(monkeypatch):
+    import quizpilot.browser as browser
+    from quizpilot import cli
+
+    seen = {}
+
+    async def fake_crawl(b, kb, jobs, downloads, concurrency):
+        seen["jobs"] = jobs
+        return []
+
+    class FakeBrowser:
+        def __init__(self, url):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            pass
+
+    monkeypatch.setattr(browser, "crawl", fake_crawl)
+    monkeypatch.setattr(browser, "Browser", FakeBrowser)
+    monkeypatch.setattr(cli, "_open_kb", lambda cfg: __import__("quizpilot.kb").kb.KB(":memory:"))
+    cli.main(["crawl", "https://x.test/a", "--module", "07"])
+    assert seen["jobs"] == [("07", "https://x.test/a")]
+    cli.main(["crawl", "--modules", "11"])
+    assert seen["jobs"] and all(m == "11" for m, _ in seen["jobs"])

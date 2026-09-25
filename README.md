@@ -41,6 +41,58 @@ setx DEEPSEEK_API_KEY "sk-..."      # then open a new terminal
 3. Edit `quizpilot.toml` and set `model` to the exact DeepSeek model ID
    from your console (the V4.1 Flash ID).
 
+## Team setup (3 people)
+
+Each teammate runs quizpilot on their own Windows PC with their own Chrome
+logins. The whole team shares one knowledge base.
+
+**Install for teammates, no Python needed.** Every push builds
+`quizpilot-windows.zip` on GitHub (Actions → windows-build → Artifacts;
+tagged versions such as `v0.2.0` also appear under Releases). To use it:
+
+1. Unzip it anywhere.
+2. Double-click `quizpilot-shell.bat`. This opens a terminal where
+   `quizpilot` works and creates `quizpilot.toml` the first time.
+3. Set the API key: `setx DEEPSEEK_API_KEY "sk-..."`, then reopen the shell.
+   Everyone can use the same DeepSeek key.
+4. Run `quizpilot chrome` and log in with **your own** accounts. Never share
+   Chrome profiles: they contain your login cookies.
+
+Teammates need read access to the repository to download the build. The
+repository owner adds them under Settings → Collaborators.
+
+**Split the prep, then merge.** Divide the 50 modules, for example:
+
+| Person | Modules |
+|---|---|
+| A | 01–17 (AI tools, government sites, law, standards, patents) |
+| B | 18–34 (learning resources, academic databases, search techniques) |
+| C | 35–50 (filters, search engines, tools, academic writing) |
+
+Each person crawls, captures and ingests their own modules, then exports:
+
+```powershell
+quizpilot kb --export kb-A.sqlite
+```
+
+One person merges all three exports and sends the combined file back to
+everyone, who merges it in turn:
+
+```powershell
+quizpilot kb --merge kb-B.sqlite kb-C.sqlite
+quizpilot kb --export kb-team.sqlite
+quizpilot kb --merge kb-team.sqlite
+```
+
+Merging is safe to repeat. When two people captured the same page, the
+newer capture wins. Anything you captured that a teammate didn't is kept.
+
+**Team round (10 questions, 15 minutes, +4/−1).** Everyone runs
+`quizpilot ask --round team`. Split the questions (for example A: 1–4,
+B: 5–7, C: 8–10), and let whoever finishes first double-check the
+low-confidence answers of the others. At +4/−1, even a single-choice guess
+with one wrong option ruled out is worth answering.
+
 ## Prep workflow
 
 ```powershell
@@ -141,6 +193,7 @@ quizpilot pdf https://arxiv.org/pdf/2108.09800 # page count
 | `src/quizpilot/question.py` | Parses pasted questions (single/multi/judge, A–D options, answer key) |
 | `src/quizpilot/pdftools.py` | Page-accurate PDF facts |
 | `src/quizpilot/data/sites.json` | The guide's sites per module (edit freely) |
+| `scripts/quizpilot.spec`, `.github/workflows/windows-build.yml` | Windows build without Python (PyInstaller) |
 
 Run the tests with `pytest`.
 

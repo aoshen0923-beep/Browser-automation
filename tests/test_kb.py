@@ -46,3 +46,32 @@ def test_readding_replaces_document():
         assert kb.search("香蕉")[0].source == "u"
         kb.remove("u")
         assert kb.stats() == {"docs": 0, "chunks": 0}
+
+
+def test_export_and_merge(tmp_path):
+    with KB(tmp_path / "me.sqlite") as me, KB(tmp_path / "mate.sqlite") as mate:
+        me.add_document("shared", [(None, "旧版菜单")], title="豆包", added_at=100)
+        me.add_document("mine", [(None, "我的截图")], added_at=100)
+        mate.add_document("shared", [(None, "新版菜单 学术风")], title="豆包", module="04", added_at=200)
+        mate.add_document("theirs", [(3, "队友的标准全文")], added_at=150)
+        mate.add_document("mine", [(None, "older copy")], added_at=50)
+        exported = mate.export(tmp_path / "out" / "mate-export.sqlite")
+
+        assert me.merge_from(exported) == {"added": 1, "updated": 1, "kept": 1}
+        assert me.search("学术风")[0].module == "04"
+        assert me.search("旧版") == []
+        assert me.search("标准全文")[0].page == 3
+        assert me.search("我的截图")[0].source == "mine"
+        # Merging the same file again changes nothing.
+        assert me.merge_from(exported) == {"added": 0, "updated": 0, "kept": 3}
+
+
+def test_merge_rejects_other_files(tmp_path):
+    import sqlite3
+
+    import pytest
+
+    bad = tmp_path / "bad.sqlite"
+    sqlite3.connect(str(bad)).execute("CREATE TABLE x(y)").connection.commit()
+    with KB(":memory:") as kb, pytest.raises(ValueError):
+        kb.merge_from(bad)

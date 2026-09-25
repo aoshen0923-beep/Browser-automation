@@ -89,12 +89,15 @@ def cmd_crawl(args, cfg: Config) -> int:
     from .browser import Browser, crawl
 
     wanted = _module_filter(args.modules)
-    jobs = [
-        (e["module"], u)
-        for e in load_sites()
-        if not wanted or e["module"] in wanted
-        for u in e["urls"]
-    ]
+    jobs: list[tuple[str, str]] = []
+    # Explicit URLs alone crawl just those; otherwise the guide's sites.
+    if wanted or not args.urls:
+        jobs = [
+            (e["module"], u)
+            for e in load_sites()
+            if not wanted or e["module"] in wanted
+            for u in e["urls"]
+        ]
     jobs += [(args.module or "", u) for u in args.urls]
 
     async def run() -> None:
@@ -147,6 +150,16 @@ def cmd_kb(args, cfg: Config) -> int:
         if args.remove:
             kb.remove(args.remove)
             print(f"removed {args.remove}")
+        for path in args.merge or []:
+            try:
+                counts = kb.merge_from(path)
+            except ValueError as e:
+                raise RuntimeError(str(e)) from e
+            print(f"merged {path}: {counts}")
+        if args.merge:
+            print(kb.stats())
+        if args.export:
+            print(f"exported to {kb.export(args.export)} - send this file to your teammates")
     return 0
 
 
@@ -364,10 +377,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--module")
     s.set_defaults(fn=cmd_search)
 
-    s = sub.add_parser("kb", help="knowledge-base stats, listing and removal")
+    s = sub.add_parser("kb", help="knowledge-base stats, listing, removal and team sharing")
     s.add_argument("--list", action="store_true")
     s.add_argument("--module")
     s.add_argument("--remove", metavar="SOURCE")
+    s.add_argument("--merge", nargs="+", metavar="FILE", help="merge teammates' exported KB files into yours")
+    s.add_argument("--export", metavar="FILE", help="write your KB to one file to share")
     s.set_defaults(fn=cmd_kb)
 
     s = sub.add_parser("pdf", help="page-accurate PDF facts: page count, images, last character, labels")

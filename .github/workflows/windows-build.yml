@@ -1,0 +1,71 @@
+name: windows-build
+
+# Builds quizpilot-windows.zip (no Python needed) for teammates.
+# Download it from the run's "Artifacts" section, or from a release when
+# a tag like v0.2.0 is pushed.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e ".[dev]" pyinstaller
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build
+        working-directory: scripts
+        run: pyinstaller -y --distpath ../dist --workpath ../build quizpilot.spec
+
+      - name: Smoke test the exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Resolve-Path dist\quizpilot\quizpilot.exe
+          New-Item -ItemType Directory smoke | Out-Null
+          Set-Location smoke
+          & $exe init
+          & $exe sites --modules 11
+          & $exe ingest ..\README.md
+          & $exe kb --export shared.sqlite
+          if (-not (Test-Path shared.sqlite)) { throw "export failed" }
+          # Proves the bundled Playwright driver starts: no Chrome is running,
+          # so this must fail with the friendly "Can't reach Chrome" error.
+          $env:QUIZPILOT_CDP_URL = "http://127.0.0.1:9"
+          $out = & $exe crawl https://example.com 2>&1 | Out-String
+          if ($out -notmatch "Can't reach Chrome") { throw "unexpected crawl output: $out" }
+          exit 0
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Copy-Item scripts\quizpilot-shell.bat dist\quizpilot\
+          Copy-Item README.md dist\quizpilot\
+          Compress-Archive -Path dist\quizpilot -DestinationPath quizpilot-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quizpilot-windows
+          path: quizpilot-windows.zip
+          retention-days: 30
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: quizpilot-windows.zip

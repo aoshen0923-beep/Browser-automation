@@ -75,13 +75,14 @@ class KB:
         title: str = "",
         kind: str = "",
         module: str = "",
+        added_at: float | None = None,
     ) -> int:
         """Insert or replace a document. `pages` is [(page_number, text)]."""
         with self.db:
             self._delete_source(source)
             cur = self.db.execute(
                 "INSERT INTO docs(source, title, kind, module, added_at) VALUES (?,?,?,?,?)",
-                (source, title, kind, module, time.time()),
+                (source, title, kind, module, added_at if added_at is not None else time.time()),
             )
             doc_id = cur.lastrowid
             head = f"{title}\n" if title else ""
@@ -146,3 +147,39 @@ class KB:
             sql += " WHERE module=?"
             args = (module,)
         return self.db.execute(sql + " ORDER BY added_at", args).fetchall()
+
+    def export(self, dest: Path | str) -> Path:
+        """Write a consistent copy of the whole KB to one file for sharing."""
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            dest.unlink()
+        out = sqlite3.connect(str(dest))
+        try:
+            self.db.backup(out)
+        finally:
+            out.close()
+        return dest
+
+    def merge_from(self, path: Path | str) -> dict[str, int]:
+        """Merge a teammate's exported KB; for the same source the newer copy wins."""
+        other = sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro", uri=True)
+        counts = {"added": 0, "updated": 0, "kept": 0}
+        try:
+            try:
+                docs = other.execute("SELECT id, source, title, kind, module, added_at FROM docs").fetchall()
+            except sqlite3.DatabaseError as e:
+                raise ValueError(f"{path} is not a quizpilot knowledge base") from e
+            for doc_id, source, title, kind, module, added_at in docs:
+                mine = self.db.execute("SELECT added_at FROM docs WHERE source=?", (source,)).fetchone()
+                if mine and mine[0] >= added_at:
+                    counts["kept"] += 1
+                    continue
+                pages = other.execute(
+                    "SELECT page, text FROM chunks WHERE doc_id=? ORDER BY id", (doc_id,)
+                ).fetchall()
+                self.add_document(source, pages, title=title, kind=kind, module=module, added_at=added_at)
+                counts["updated" if mine else "added"] += 1
+        finally:
+            other.close()
+        return counts
