@@ -232,18 +232,16 @@ class App:
         jobs = [(s["module"], u) for s in self.sites if s["module"] in modules for u in s["urls"]]
         t = self.kb_task = {"running": True, "done": 0, "ok": 0, "total": len(jobs), "log": []}
         try:
+            from .browser import crawl
+
             browser = await self._get_browser()
-            sem = asyncio.Semaphore(3)
-            downloads = self.cfg.resolve(self.cfg.kb.downloads)
 
-            async def one(module: str, url: str) -> None:
-                async with sem:
-                    line = await browser.fetch_into_kb(url, self.kb, module=module, downloads=downloads)
-                    t["done"] += 1
-                    t["ok"] += line.startswith("ok")
-                    t["log"].append(f"[{module}] {line}")
+            def log(line: str) -> None:
+                t["done"] += 1
+                t["ok"] += "] ok" in line
+                t["log"].append(line)
 
-            await asyncio.gather(*(one(m, u) for m, u in jobs))
+            await crawl(browser, self.kb, jobs, self.cfg.resolve(self.cfg.kb.downloads), concurrency=3, log=log)
         except Exception as e:
             t["log"].append(f"出错：{type(e).__name__}: {e}")
         finally:

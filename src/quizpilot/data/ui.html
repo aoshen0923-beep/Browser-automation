@@ -256,6 +256,7 @@ $("live").addEventListener("change", savePrefs);
 $("budget").addEventListener("change", savePrefs);
 
 async function submit(text) {
+  askNotifyPermission();
   text = (text ?? $("q").value).trim();
   if (text.length < 4) { $("q").focus(); return; }
   $("go").disabled = true;
@@ -325,8 +326,10 @@ async function refresh(id) {
   const lastWait = j.log.findLastIndex((l) => l.includes("需要人机验证"));
   const lastEnd = j.log.findLastIndex((l) => l.includes("验证已通过") || l.includes("等待验证超时"));
   const waiting = j.status === "running" && lastWait > lastEnd;
-  if (waiting && !el.dataset.beeped) { el.dataset.beeped = "1"; beep(); }
+  if (waiting && !el.dataset.beeped) { el.dataset.beeped = "1"; beep(); notifyCaptcha(j); }
   if (!waiting) delete el.dataset.beeped;
+  waitingJobs[waiting ? "add" : "delete"](id);
+  updateTitle();
   el.innerHTML = `${waiting ? `<div class="captcha">需要人机验证：请切换到 Chrome 窗口完成验证，完成后会自动继续。</div>` : ""}
     <div class="stem">#${j.id} ${esc(j.stem)}</div>
     <div class="muted">${kind} · ${j.round === "team" ? "团队赛" : "个人赛"} · ${head}</div>
@@ -571,6 +574,29 @@ $("merge-file").addEventListener("change", async (e) => {
   e.target.value = "";
   loadKb();
 });
+
+// A system notification and a flashing tab title, so a verification page is
+// noticed even while working in another window.
+const waitingJobs = new Set();
+const baseTitle = document.title;
+let flash = false;
+function updateTitle(toggle = false) {
+  if (!waitingJobs.size) { document.title = baseTitle; return; }
+  if (toggle) flash = !flash;
+  document.title = flash ? "⚠ 请到浏览器完成验证" : "【需要人机验证】" + baseTitle;
+}
+setInterval(() => updateTitle(true), 1000);  // the only place that flips the flash
+function askNotifyPermission() {
+  try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch (e) {}
+}
+function notifyCaptcha(j) {
+  try {
+    if ("Notification" in window && Notification.permission === "granted") {
+      const n = new Notification("需要人机验证", {body: `第 ${j.id} 题：请到浏览器窗口完成验证，完成后自动继续`, requireInteraction: true});
+      setTimeout(() => n.close(), 60000);
+    }
+  } catch (e) {}
+}
 
 function beep() {
   try {

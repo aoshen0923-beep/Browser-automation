@@ -96,3 +96,32 @@ def test_crawl_and_capture(site, chrome, tmp_path):
             assert kb.stats()["docs"] == 3
 
     asyncio.run(run())
+
+
+def test_host_pacer_spaces_requests_to_one_site_only():
+    from quizpilot.browser import HostPacer
+
+    pacer = HostPacer(min_interval=0.3)
+    starts: dict[str, list[float]] = {"a": [], "b": []}
+
+    async def hit(site, url):
+        async with pacer.slot(url):
+            starts[site].append(time.monotonic())
+            await asyncio.sleep(0.05)
+
+    async def run():
+        t0 = time.monotonic()
+        await asyncio.gather(*(hit("a", f"https://a.example/{i}") for i in range(3)),
+                             *(hit("b", f"https://b.example/{i}") for i in range(1)))
+        return t0
+
+    t0 = asyncio.run(run())
+    a = starts["a"]
+    assert all(later - earlier >= 0.3 for earlier, later in zip(a, a[1:])), a
+    assert starts["b"][0] - t0 < 0.2  # another site isn't held up
+
+
+def test_more_chinese_challenge_pages_are_recognized():
+    assert looks_like_challenge("访问过于频繁，请稍后再试", [])
+    assert looks_like_challenge("请拖动下方拼图完成验证", [])
+    assert looks_like_challenge("正常页面" * 300, ["https://c.dun.163.com/api/v2/get"])

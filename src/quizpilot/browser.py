@@ -26,12 +26,14 @@ from . import pdftools
 BLOCKED_RESOURCES = {"image", "media", "font"}
 
 _CHALLENGE_FRAMES = (
-    "geetest", "captcha.qq.com", "turing.captcha", "recaptcha", "hcaptcha",
-    "challenges.cloudflare", "nocaptcha", "aliyuncs.com/captcha",
+    "geetest", "captcha.qq.com", "turing.captcha", "tcaptcha", "captcha.gtimg", "recaptcha", "hcaptcha",
+    "challenges.cloudflare", "nocaptcha", "aliyuncs.com/captcha", "nc.aliyuncs", "dun.163.com",
+    "necaptcha", "vaptcha", "dingxiang-inc.com", "verify.baidu.com",
 )
 _CHALLENGE_WORDS = (
-    "验证码", "安全验证", "人机验证", "滑动验证", "拖动滑块", "向右滑动", "请完成验证",
-    "访问验证", "异常访问", "captcha", "verify you are human", "are you a robot",
+    "验证码", "安全验证", "人机验证", "滑动验证", "拖动滑块", "向右滑动", "请完成验证", "请按住滑块",
+    "拖动下方拼图", "点击完成验证", "请依次点击", "请输入图中", "访问验证", "异常访问", "访问过于频繁",
+    "安全检查", "captcha", "verify you are human", "are you a robot",
 )
 
 
@@ -229,14 +231,50 @@ class Browser:
         return f"captured {snap.url} ({len(snap.text)} chars)"
 
 
-async def crawl(browser: Browser, kb: KB, jobs: list[tuple[str, str]], downloads: Path, concurrency: int = 4):
-    """Fetch (module, url) pairs into the KB, a few tabs at a time."""
+class HostPacer:
+    """At most one request at a time per site, with a gap between them.
+
+    Bursts of requests to one site are the usual trigger for verification
+    pages; different sites still load in parallel.
+    """
+
+    def __init__(self, min_interval: float = 2.0):
+        self.min_interval = min_interval
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._last: dict[str, float] = {}
+
+    @staticmethod
+    def host(url: str) -> str:
+        return urlparse(url).netloc.lower()
+
+    def slot(self, url: str):
+        pacer, host = self, self.host(url)
+
+        class _Slot:
+            async def __aenter__(self_inner):
+                lock = pacer._locks.setdefault(host, asyncio.Lock())
+                await lock.acquire()
+                wait = pacer._last.get(host, 0) + pacer.min_interval - time.monotonic()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+
+            async def __aexit__(self_inner, *exc):
+                pacer._last[host] = time.monotonic()
+                pacer._locks[host].release()
+
+        return _Slot()
+
+
+async def crawl(browser: Browser, kb: KB, jobs: list[tuple[str, str]], downloads: Path, concurrency: int = 4,
+                pacer: HostPacer | None = None, log=None):
+    """Fetch (module, url) pairs into the KB: a few tabs at a time, one per site."""
     sem = asyncio.Semaphore(concurrency)
+    pacer = pacer or HostPacer()
 
     async def one(module: str, url: str) -> str:
-        async with sem:
+        async with pacer.slot(url), sem:
             line = await browser.fetch_into_kb(url, kb, module=module, downloads=downloads)
-            print(f"[{module}] {line}", flush=True)
+            (log or (lambda m: print(m, flush=True)))(f"[{module}] {line}")
             return line
 
     return await asyncio.gather(*(one(m, u) for m, u in jobs))

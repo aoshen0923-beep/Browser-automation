@@ -117,8 +117,13 @@ quizpilot crawl --modules 11,12,21       # snapshot those sites into the KB
 quizpilot crawl https://example.org/x.pdf --module 01   # extra pages/PDFs
 ```
 
-Crawling opens a few tabs at a time and blocks images and fonts to load
-faster. If a page is stuck behind a CAPTCHA, it beeps, brings that tab to
+Crawling opens a few tabs at a time but only one per site, with a gap
+between requests to the same site (bursts are the usual trigger for
+verification pages), and blocks images and fonts to load faster.
+quizpilot never tries to solve CAPTCHAs itself: that breaks the sites' terms
+and can get an account or a school's IP blocked. When one appears, the
+answering page shows a banner, flashes its tab title and sends a system
+notification, and research resumes as soon as you've solved it. If a page is stuck behind a CAPTCHA, it beeps, brings that tab to
 the front and waits for you to solve it.
 
 Many questions ask what a menu or panel contains, for example "which styles
