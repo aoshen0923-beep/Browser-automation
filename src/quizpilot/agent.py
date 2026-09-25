@@ -183,7 +183,7 @@ class Agent:
         if await page_blocked(self.page):
             await self.page.unroute("**/*")  # the CAPTCHA picture must load
             await self.page.reload(wait_until="domcontentloaded")
-            await wait_for_human(self.page)
+            await wait_for_human(self.page, log=self.log)
             await self._prepare(self.page)
 
     async def _follow_new_tab(self, before: int) -> None:

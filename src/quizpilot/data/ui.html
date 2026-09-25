@@ -58,6 +58,8 @@ a { color: var(--accent); overflow-wrap: anywhere; }
   border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; vertical-align: -1px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .err { color: var(--bad); }
+.captcha { background: var(--skip-bg); color: var(--skip); border-radius: 8px; padding: 8px 12px;
+  font-weight: 600; margin-bottom: 10px; }
 @media (max-width: 600px) { .big { font-size: 24px; } }
 </style>
 </head>
@@ -196,7 +198,14 @@ async function refresh(id) {
   const head = j.status === "running"
     ? `<span class="spinner"></span> ${esc(j.phase)} · ${j.elapsed}s`
     : `完成 · 用时 ${j.elapsed}s`;
-  el.innerHTML = `<div class="stem">#${j.id} ${esc(j.stem)}</div>
+  // Show a banner while the agent waits for a CAPTCHA to be solved in Chrome.
+  const lastWait = j.log.findLastIndex((l) => l.includes("需要人机验证"));
+  const lastEnd = j.log.findLastIndex((l) => l.includes("验证已通过") || l.includes("等待验证超时"));
+  const waiting = j.status === "running" && lastWait > lastEnd;
+  if (waiting && !el.dataset.beeped) { el.dataset.beeped = "1"; beep(); }
+  if (!waiting) delete el.dataset.beeped;
+  el.innerHTML = `${waiting ? `<div class="captcha">需要人机验证：请切换到 Chrome 窗口完成验证，完成后会自动继续。</div>` : ""}
+    <div class="stem">#${j.id} ${esc(j.stem)}</div>
     <div class="muted">${kind} · ${j.round === "team" ? "团队赛" : "个人赛"} · ${head}</div>
     ${j.error ? `<div class="err" style="margin-top:6px">${esc(j.error)}</div>` : ""}
     ${answerBlock(j.final, "上网查找后的答案", j.round)}
@@ -205,6 +214,17 @@ async function refresh(id) {
   const log = el.querySelector(".log");
   if (log) log.scrollTop = log.scrollHeight;
   if (j.status === "done") running.delete(id);
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    osc.frequency.value = 880;
+    osc.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.25);
+  } catch (e) {}
 }
 
 setInterval(() => { for (const id of running) refresh(id); }, 800);

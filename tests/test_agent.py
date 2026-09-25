@@ -55,6 +55,12 @@ def std_site(tmp_path):
         '<a href="std.pdf">查看全文</a>',
         encoding="utf-8",
     )
+    # A verification page that "gets solved" 1.5 s after loading.
+    (tmp_path / "captcha.html").write_text(
+        '<meta charset="utf-8"><title>安全验证</title><body>请完成安全验证</body>'
+        "<script>setTimeout(() => { document.body.innerText = '检索结果 '.repeat(200); }, 1500)</script>",
+        encoding="utf-8",
+    )
     doc = pymupdf.open()
     doc.new_page().insert_text((72, 72), "GB/T 38880-2020")
     page = doc.new_page()
@@ -182,3 +188,26 @@ def test_repeated_goto_is_skipped(std_site, chrome):  # noqa: F811
 
     result = asyncio.run(run())
     assert [s.result.startswith("重复操作") for s in result.steps] == [False, True, True]
+
+
+def test_captcha_wait_is_reported_and_research_continues(std_site, chrome, tmp_path):  # noqa: F811
+    class OneStep:
+        n = 0
+
+        def chat_json(self, system, user, max_tokens=700):
+            OneStep.n += 1
+            if OneStep.n == 1:
+                return {"action": "goto", "url": std_site + "/captcha.html"}
+            return {"action": "answer", "answer": "C", "confidence": 0.5}
+
+    logs = []
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, OneStep(), [], None, log=logs.append)
+            return await agent.run(parse_question(QUESTION, "single"), budget=60, close=True)
+
+    result = asyncio.run(run())
+    assert result.answer.answer == "C"
+    assert any("需要人机验证" in line for line in logs), logs
+    assert any("验证已通过" in line for line in logs), logs

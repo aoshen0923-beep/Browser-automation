@@ -66,17 +66,32 @@ async def page_blocked(page: Page) -> bool:
     return looks_like_challenge(text, [f.url for f in page.frames])
 
 
-async def wait_for_human(page: Page, timeout: float = 180) -> bool:
-    """Bring a blocked page to the front and wait until the challenge clears."""
+CHALLENGE_WAIT = "需要人机验证：请到 Chrome 窗口完成验证，完成后自动继续"
+CHALLENGE_DONE = "验证已通过，继续查找"
+CHALLENGE_TIMEOUT = "等待验证超时，跳过这个页面"
+
+
+async def wait_for_human(page: Page, timeout: float = 180, log=None) -> bool:
+    """Bring a blocked page to the front and wait until the challenge clears.
+
+    `log` (e.g. the answering page's step list) gets the same notices as
+    the console, so the person knows to switch to Chrome.
+    """
     await page.bring_to_front()
     alert(f"Verification needed on {page.url} - solve it in the browser window.")
+    if log:
+        log(f"  ⚠ {CHALLENGE_WAIT}（{page.url[:80]}）")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         await asyncio.sleep(1)
         if not await page_blocked(page):
             print(">>> Cleared, continuing.", flush=True)
+            if log:
+                log(f"  ✓ {CHALLENGE_DONE}")
             return True
     print(">>> Timed out waiting for verification.", flush=True)
+    if log:
+        log(f"  ✗ {CHALLENGE_TIMEOUT}")
     return False
 
 
