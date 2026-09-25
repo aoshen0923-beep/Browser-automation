@@ -98,6 +98,7 @@ class App:
         from .logins import STATE_NAME, Logins
 
         self.logins = Logins(cfg.resolve(STATE_NAME))
+        self.recorder = None
 
     # --- jobs ----------------------------------------------------------------------
 
@@ -166,6 +167,59 @@ class App:
             b = self._browser = await Browser(self.cfg.browser.cdp_url).__aenter__()
             return b
 
+    # --- recorded flows ------------------------------------------------------------
+
+    async def start_recording(self, url: str) -> None:
+        from .flows import Recorder
+
+        browser = await self._get_browser()
+        if self.recorder is not None:
+            self.recorder.stop()
+        self.recorder = Recorder(browser.context)
+        await self.recorder.start(url)
+
+    def recording_state(self) -> dict:
+        from .flows import _merge_steps, describe_step
+
+        if self.recorder is None:
+            return {"active": False, "steps": []}
+        steps = _merge_steps(self.recorder.events)
+        return {"active": True, "start_url": self.recorder.start_url, "steps": [describe_step(s) for s in steps]}
+
+    def stop_recording(self, name: str, description: str, save: bool = True) -> dict | None:
+        from .flows import build_flow
+
+        rec, self.recorder = self.recorder, None
+        if rec is None:
+            raise RuntimeError("没有正在进行的录制")
+        events = rec.stop()
+        if not save:
+            return None
+        flow = build_flow(name, description, rec.start_url, events)
+        if not flow.steps:
+            raise RuntimeError("没有录到任何操作")
+        self.kb.save_flow(flow)
+        return self.flow_dict(flow)
+
+    @staticmethod
+    def flow_dict(flow) -> dict:
+        from .flows import describe_step
+
+        return {"name": flow.name, "description": flow.description, "start_url": flow.start_url,
+                "params": flow.params, "steps": [describe_step(s) for s in flow.steps]}
+
+    async def run_flow(self, name: str, params: dict) -> str:
+        from .flows import replay
+
+        flow = self.kb.get_flow(name)
+        if flow is None:
+            raise RuntimeError(f"没有流程「{name}」")
+        browser = await self._get_browser()
+        page = await browser.context.new_page()
+        await page.bring_to_front()
+        end = await replay(browser.context, page, flow, params, log=lambda *_: None)
+        return end.url
+
     async def open_for_login(self, url: str) -> None:
         """Open a site in the dedicated browser, in front, for you to log in."""
         browser = await self._get_browser()
@@ -204,6 +258,10 @@ class App:
                         "live_available": app.live_available,
                         "rounds": {k: {"gain": v[0], "loss": v[1], "budget": LIVE_BUDGET[k]} for k, v in ROUNDS.items()},
                     })
+                if self.path == "/api/flows":
+                    return self._json([app.flow_dict(f) for f in app.kb.flows()])
+                if self.path == "/api/flows/recording":
+                    return self._json(app.recording_state())
                 if self.path == "/api/logins":
                     return self._json(app.logins.sites())
                 if self.path == "/api/jobs":
@@ -223,6 +281,8 @@ class App:
             def do_POST(self):
                 if self.path.startswith("/api/logins/"):
                     return self._logins(self.path.rsplit("/", 1)[-1])
+                if self.path.startswith("/api/flows/"):
+                    return self._flows(self.path.rsplit("/", 1)[-1])
                 if self.path != "/api/ask":
                     return self._json({"error": "not found"}, 404)
                 try:
@@ -237,6 +297,33 @@ class App:
                 except Exception as e:
                     return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
                 return self._json({"id": job.id, "kind": job.q.kind, "options": len(job.q.options)})
+
+            def _flows(self, action: str):
+                try:
+                    data = self._body()
+                    if not app.live_available and action in ("record", "run"):
+                        return self._json({"error": "浏览器功能已关闭（--no-live）"}, 400)
+                    if action == "record":
+                        url = str(data.get("url", "")).strip()
+                        if not url.startswith(("http://", "https://")):
+                            url = "https://" + url
+                        asyncio.run_coroutine_threadsafe(app.start_recording(url), app.loop).result(timeout=45)
+                        return self._json({"ok": True})
+                    if action == "stop":
+                        return self._json(app.stop_recording(str(data.get("name", "")), str(data.get("description", ""))))
+                    if action == "cancel":
+                        app.stop_recording("", "", save=False)
+                        return self._json({"ok": True})
+                    if action == "delete":
+                        app.kb.delete_flow(str(data["name"]))
+                        return self._json({"ok": True})
+                    if action == "run":
+                        params = data.get("params") if isinstance(data.get("params"), dict) else {}
+                        fut = asyncio.run_coroutine_threadsafe(app.run_flow(str(data["name"]), params), app.loop)
+                        return self._json({"url": fut.result(timeout=120)})
+                except Exception as e:
+                    return self._json({"error": f"{type(e).__name__}: {e}"}, 400)
+                return self._json({"error": "not found"}, 404)
 
             def _logins(self, action: str):
                 try:

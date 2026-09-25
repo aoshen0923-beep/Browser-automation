@@ -39,7 +39,7 @@ button.primary { background: var(--accent); color: var(--accent-text); border-co
 button:disabled { opacity: .5; cursor: default; }
 .spacer { flex: 1; }
 #jobs { margin-top: 18px; display: grid; gap: 14px; }
-.job .stem { font-weight: 600; margin-bottom: 6px; overflow-wrap: anywhere; }
+.stem { font-weight: 600; margin-bottom: 6px; overflow-wrap: anywhere; }
 .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
 .big { font-size: 30px; font-weight: 700; letter-spacing: 2px; min-width: 64px; }
 .badge { border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 600; }
@@ -88,6 +88,7 @@ header { flex-wrap: wrap; }
     <nav class="tabs">
       <button class="tab active" data-view="ask">答题</button>
       <button class="tab" data-view="login">网站登录</button>
+      <button class="tab" data-view="flows">操作流程</button>
     </nav>
     <span class="muted" id="status">连接中…</span>
   </header>
@@ -135,6 +136,29 @@ header { flex-wrap: wrap; }
       </div>
     </div>
     <div id="sites"></div>
+  </section>
+
+  <section id="view-flows" hidden>
+    <div class="panel">
+      <div><b>把多步操作录下来，以后一步完成。</b>比如知网高级检索 → 可视化分析 → 作者分布：
+        你在浏览器里演示一遍，工具记下每次点击、输入和选择；你输入过的文字会变成可替换的参数。
+        答题时 AI 直接调用这个流程、填入本题的参数，几秒钟自动做完。</div>
+      <div class="controls">
+        <input type="text" id="rec-url" placeholder="起始网址，例如 https://kns.cnki.net/kns8s/AdvSearch" style="flex:1;min-width:240px">
+        <button class="primary" id="rec-start">开始录制</button>
+      </div>
+    </div>
+    <div class="panel" id="rec-panel" style="margin-top:12px" hidden>
+      <div><span class="spinner"></span> <b>正在录制</b>：请在弹出的浏览器窗口里操作，完成后回来点「保存流程」。</div>
+      <ol id="rec-steps" class="muted" style="margin:8px 0"></ol>
+      <div class="controls">
+        <input type="text" id="rec-name" placeholder="流程名称，例如 知网-高级检索-作者分布">
+        <input type="text" id="rec-desc" placeholder="用途说明，例如 按第一单位+年份+CSSCI检索并看作者分布" style="flex:1;min-width:200px">
+        <button class="primary" id="rec-save">保存流程</button>
+        <button id="rec-cancel">放弃</button>
+      </div>
+    </div>
+    <div id="flows" style="margin-top:12px"></div>
   </section>
 </main>
 
@@ -270,7 +294,9 @@ function showView(view) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
   $("view-ask").hidden = view !== "ask";
   $("view-login").hidden = view !== "login";
+  $("view-flows").hidden = view !== "flows";
   if (view === "login") loadSites();
+  if (view === "flows") { loadFlows(); pollRecording(); }
   try { localStorage.setItem("qp-view", view); } catch (e) {}
 }
 
@@ -349,6 +375,71 @@ $("import-file").addEventListener("change", async (e) => {
   e.target.value = "";
 });
 
+// --- recorded flows --------------------------------------------------------------
+let recTimer = null;
+async function pollRecording() {
+  let st;
+  try { st = await (await fetch("/api/flows/recording")).json(); } catch (e) { return; }
+  $("rec-panel").hidden = !st.active;
+  $("rec-start").disabled = st.active;
+  $("rec-steps").innerHTML = st.steps.length ? st.steps.map((x) => `<li>${esc(x)}</li>`).join("") : "<li>还没有操作</li>";
+  clearTimeout(recTimer);
+  if (st.active) recTimer = setTimeout(pollRecording, 1000);
+}
+async function loadFlows() {
+  let flows = [];
+  try { flows = await (await fetch("/api/flows")).json(); } catch (e) {}
+  $("flows").innerHTML = flows.length ? flows.map((f) => `<div class="panel" style="margin-top:10px">
+      <div class="stem">${esc(f.name)}</div>
+      <div class="muted">${esc(f.description || "")} · ${f.steps.length} 步 · 起始 ${esc(f.start_url)}</div>
+      <ol class="muted" style="margin:6px 0">${f.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>
+      <div class="controls">
+        ${f.params.map((p) => `<label>${esc(p.name)} <input type="text" data-param="${esc(p.name)}" value="${esc(p.example)}"></label>`).join("")}
+        <span class="spacer"></span>
+        <button data-run="${esc(f.name)}">试运行</button>
+        <button data-del="${esc(f.name)}">删除</button>
+      </div></div>`).join("")
+    : `<p class="muted">还没有录制的流程。</p>`;
+}
+$("rec-start").addEventListener("click", async () => {
+  const url = $("rec-url").value.trim();
+  if (!url) { $("rec-url").focus(); return; }
+  $("rec-start").disabled = true;
+  try { await api("/api/flows/record", {url}); } catch (e) { alert("开始录制失败：" + e.message); }
+  pollRecording();
+});
+$("rec-save").addEventListener("click", async () => {
+  if (!$("rec-name").value.trim()) { $("rec-name").focus(); return; }
+  try {
+    await api("/api/flows/stop", {name: $("rec-name").value, description: $("rec-desc").value});
+    $("rec-name").value = ""; $("rec-desc").value = "";
+  } catch (e) { alert("保存失败：" + e.message); }
+  pollRecording(); loadFlows();
+});
+$("rec-cancel").addEventListener("click", async () => {
+  try { await api("/api/flows/cancel", {}); } catch (e) {}
+  pollRecording();
+});
+$("flows").addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.del) {
+    if (!confirm(`删除流程「${b.dataset.del}」？`)) return;
+    await api("/api/flows/delete", {name: b.dataset.del});
+    return loadFlows();
+  }
+  if (b.dataset.run) {
+    const params = {};
+    b.closest(".panel").querySelectorAll("[data-param]").forEach((i) => { params[i.dataset.param] = i.value; });
+    b.disabled = true; b.textContent = "运行中…";
+    try {
+      const r = await api("/api/flows/run", {name: b.dataset.run, params});
+      b.textContent = "完成，已在浏览器打开";
+    } catch (err) { alert("运行失败：" + err.message); b.textContent = "试运行"; }
+    b.disabled = false;
+  }
+});
+
 function beep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -362,7 +453,7 @@ function beep() {
 
 setInterval(() => { for (const id of running) refresh(id); }, 800);
 init();
-try { if (localStorage.getItem("qp-view") === "login") showView("login"); } catch (e) {}
+try { const v = localStorage.getItem("qp-view"); if (v === "login" || v === "flows") showView(v); } catch (e) {}
 $("q").focus();
 </script>
 </body>

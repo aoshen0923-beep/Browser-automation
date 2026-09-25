@@ -180,6 +180,7 @@ class Agent:
         self._frames: dict[int, object] = {}
         self._memory = ""
         self._recipes: list[str] = []
+        self._flows: list = []
         self._saved: set[str] = set()
 
     # --- page handling -------------------------------------------------------------
@@ -341,6 +342,8 @@ class Agent:
                 await el.select_option(value=option, timeout=5000)
             await self._settle()
             return "已选择"
+        if kind == "flow":
+            return await self.run_flow(a)
         if kind == "find":
             return await self.find_text(str(a.get("text", "")))
         if kind == "pdf":
@@ -350,6 +353,18 @@ class Agent:
             await self._settle()
             return "已返回"
         return f"未知动作：{kind}"
+
+    async def run_flow(self, a: dict) -> str:
+        from .flows import replay
+
+        name = str(a.get("name", ""))
+        flow = self.kb.get_flow(name) if self.kb is not None else None
+        if flow is None:
+            return f"没有名为「{name}」的流程"
+        params = a.get("params") if isinstance(a.get("params"), dict) else {}
+        self.page = await replay(self.browser.context, self.page, flow, params, log=self.log)
+        await self._prepare(self.page)
+        return f"已运行流程「{name}」，参数 {json.dumps(params, ensure_ascii=False)}"
 
     async def find_text(self, needle: str) -> str:
         if not needle:
@@ -419,6 +434,11 @@ class Agent:
         if hints:
             parts.append("\n根据题目，最可能用到的官方网站（优先直接 goto 这些网址，不要先用搜索引擎）：")
             parts += [f"- 模块{s['module']} {s['title']}：{' '.join(s['urls'][:6])}" for s in hints]
+        if self._flows:
+            parts.append("\n已录制的操作流程（一个动作就能自动完成多步操作，适合时优先用，比一步步点击快得多）：")
+            for f in self._flows:
+                example = {p["name"]: p["example"] for p in f.params}
+                parts.append(f"- {f.summary()}\n  用法：{json.dumps({'action': 'flow', 'name': f.name, 'params': example}, ensure_ascii=False)}（把参数换成本题的值）")
         if self._recipes:
             parts.append("\n以前答对过的相似题的做法（可以照着做，网址和步骤可直接复用）：")
             parts += [_clip(r, 700) for r in self._recipes]
@@ -461,8 +481,13 @@ class Agent:
 
     def _load_recipes(self, q: Question) -> None:
         self._recipes = []
+        self._flows = []
         if self.kb is None:
             return
+        try:
+            self._flows = self.kb.find_flows(q.stem + " " + " ".join(q.options.values()))
+        except Exception:
+            self._flows = []
         try:
             hits = self.kb.search(q.stem + " " + " ".join(q.options.values()), k=2, kind="recipe")
         except Exception:
@@ -531,7 +556,7 @@ class Agent:
                         break
                     self.log(f"  {label} {_describe(action)}")
                     try:
-                        result = await asyncio.wait_for(self.act(action), timeout=30)
+                        result = await asyncio.wait_for(self.act(action), timeout=90 if kind == "flow" else 30)
                     except Exception as e:
                         result = f"失败：{type(e).__name__}: {str(e).splitlines()[0][:150] if str(e) else ''}"
                     steps.append(Step(action, result))
@@ -569,7 +594,7 @@ class Agent:
         return LiveResult(ans, steps, urls)
 
 
-PAGE_CHANGING = {"goto", "search", "click", "back"}
+PAGE_CHANGING = {"goto", "search", "click", "back", "flow"}
 
 
 def _repeats(action: dict, steps: list[Step]) -> str:

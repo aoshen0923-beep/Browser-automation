@@ -171,6 +171,17 @@ browser profile keeps the login for next time, and the research agent
 prefers sites you're logged in to. Add new sites there, or import a
 bookmarks file exported from Chrome or Edge.
 
+The **操作流程** tab records multi-step operations once and replays them.
+Enter a start URL (for example CNKI advanced search), click 开始录制, and
+do the task in the browser window: every click, typed value, dropdown
+choice and checkbox is captured, including in tabs the site opens. Name the
+flow and save it. Typed values and dropdown choices become parameters.
+During live research the model sees matching flows and can run one as a
+single action with this question's values, so a 10-click CNKI sequence
+takes two model calls instead of ten. Flows are stored in the knowledge
+base and shared with `kb --export` / `--merge`. Use 试运行 to check a flow
+with other values. If a site changes its layout, record the flow again.
+
 The dedicated browser is Chrome if found, otherwise Edge; both work. To
 choose, set `executable` under `[browser]` in `quizpilot.toml`. Stick to
 one: logins saved by Edge can't be read by Chrome.

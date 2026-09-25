@@ -88,3 +88,56 @@ def test_answering_page_end_to_end(std_site, chrome, tmp_path):  # noqa: F811
 
         app.loop.call_soon_threadsafe(app.loop.stop)
         t.join(10)
+
+
+def test_record_and_run_a_flow_from_the_page(chrome, tmp_path):  # noqa: F811
+    import asyncio
+
+    from test_flows import ADV, AUTHORS, RESULT
+    import functools, http.server  # noqa: E401
+
+    for name, body in {"adv.html": ADV, "result.html": RESULT, "authors.html": AUTHORS}.items():
+        (tmp_path / name).write_text(body, encoding="utf-8")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    handler.log_message = lambda *a: None
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    site = f"http://127.0.0.1:{server.server_address[1]}"
+
+    cfg = Config(root=tmp_path)
+    cfg.browser.cdp_url = chrome
+    with KB(":memory:") as kb:
+        app = App(cfg, kb, Model(), [])
+        t = threading.Thread(target=app.serve, kwargs={"port": 0, "open_browser": False}, daemon=True)
+        t.start()
+        while not app.url:
+            time.sleep(0.1)
+        base = app.url.rstrip("/")
+
+        assert call(base + "/api/flows/record", {"url": site + "/adv.html"}) == {"ok": True}
+
+        async def demo():  # the person demonstrating in the browser window
+            page = app.recorder.page
+            await page.select_option("#field", label="篇名")
+            await page.fill("#kw", "信息素养")
+            await page.get_by_role("button", name="检索").click()
+            await page.wait_for_url("**/result.html*")
+
+        asyncio.run_coroutine_threadsafe(demo(), app.loop).result(20)
+        time.sleep(0.5)
+        state = call(base + "/api/flows/recording")
+        assert state["active"] and state["steps"][:2] == ["选择「检索字段」= 篇名", "输入「检索词」= 信息素养"], state
+
+        saved = call(base + "/api/flows/stop", {"name": "测试流程", "description": "按检索词检索"})
+        assert [p["name"] for p in saved["params"]] == ["检索字段", "检索词"]
+        assert call(base + "/api/flows/recording") == {"active": False, "steps": []}
+        assert call(base + "/api/flows")[0]["name"] == "测试流程"
+
+        ran = call(base + "/api/flows/run", {"name": "测试流程", "params": {"检索词": "大数据"}})
+        assert "result.html" in ran["url"] and "kw=%E5%A4%A7%E6%95%B0%E6%8D%AE" in ran["url"]
+
+        call(base + "/api/flows/delete", {"name": "测试流程"})
+        assert call(base + "/api/flows") == []
+        app.loop.call_soon_threadsafe(app.loop.stop)
+        t.join(10)
+    server.shutdown()

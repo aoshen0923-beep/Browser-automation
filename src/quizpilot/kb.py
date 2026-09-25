@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 CREATE INDEX IF NOT EXISTS chunks_doc ON chunks(doc_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(tokens);
+CREATE TABLE IF NOT EXISTS flows (
+  name TEXT PRIMARY KEY,
+  json TEXT NOT NULL,
+  updated REAL NOT NULL
+);
 """
 
 
@@ -197,6 +202,15 @@ class KB:
                 docs = other.execute("SELECT id, source, title, kind, module, added_at FROM docs").fetchall()
             except sqlite3.DatabaseError as e:
                 raise ValueError(f"{path} is not a quizpilot knowledge base") from e
+            try:
+                flows = other.execute("SELECT name, json, updated FROM flows").fetchall()
+            except sqlite3.DatabaseError:
+                flows = []  # exported before flows existed
+            for name, text, updated in flows:
+                mine = self.db.execute("SELECT updated FROM flows WHERE name=?", (name,)).fetchone()
+                if not mine or mine[0] < updated:
+                    with self.db:
+                        self._put_flow(name, text, updated)
             for doc_id, source, title, kind, module, added_at in docs:
                 mine = self.db.execute("SELECT added_at FROM docs WHERE source=?", (source,)).fetchone()
                 if mine and mine[0] >= added_at:
@@ -210,3 +224,43 @@ class KB:
         finally:
             other.close()
         return counts
+
+    # --- recorded flows ----------------------------------------------------------
+
+    def _put_flow(self, name: str, text: str, updated: float) -> None:
+        self.db.execute(
+            "INSERT INTO flows(name, json, updated) VALUES (?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET json=excluded.json, updated=excluded.updated",
+            (name, text, updated),
+        )
+
+    @_locked
+    def save_flow(self, flow) -> None:
+        with self.db:
+            self._put_flow(flow.name, flow.to_json(), flow.updated)
+        # A searchable card so questions can find the flow by its description.
+        self.add_document(f"flow:{flow.name}", [(None, flow.summary())], title=f"流程：{flow.name}",
+                          kind="flow", module="flow", added_at=flow.updated)
+
+    @_locked
+    def flows(self) -> list:
+        from .flows import Flow
+
+        return [Flow.from_json(r[0]) for r in self.db.execute("SELECT json FROM flows ORDER BY name").fetchall()]
+
+    @_locked
+    def get_flow(self, name: str):
+        from .flows import Flow
+
+        row = self.db.execute("SELECT json FROM flows WHERE name=?", (name,)).fetchone()
+        return Flow.from_json(row[0]) if row else None
+
+    @_locked
+    def delete_flow(self, name: str) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM flows WHERE name=?", (name,))
+            self._delete_source(f"flow:{name}")
+
+    def find_flows(self, text: str, k: int = 3) -> list:
+        names = [h.source.split(":", 1)[1] for h in self.search(text, k=k, kind="flow")]
+        return [f for f in (self.get_flow(n) for n in names) if f is not None]
