@@ -57,6 +57,17 @@ jobs:
           if ($out -notmatch "Can't reach Chrome") { throw "unexpected crawl output: $out" }
           exit 0
 
+      - name: Smoke test the shell launcher outside the extracted folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory lonely | Out-Null
+          Copy-Item scripts\quizpilot-shell.bat lonely\
+          $out = "`n" | cmd /c lonely\quizpilot-shell.bat 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 1 -or $out -notmatch "Extract All") { throw "launcher did not explain the missing exe (exit $code)" }
+          exit 0
+
       - name: Package
         shell: pwsh
         run: |

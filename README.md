@@ -51,7 +51,9 @@ logins. The whole team shares one knowledge base.
 publish a release with a permanent link: Actions → windows-build → Run
 workflow → enter a new version such as `v0.1.1`. To use it:
 
-1. Unzip it anywhere.
+1. Right-click the zip → **Extract All** (全部解压缩). Don't run anything
+   from inside the zip without extracting it: Windows then unpacks only
+   the file you clicked, and `quizpilot` won't be found.
 2. Double-click `quizpilot-shell.bat`. This opens a terminal where
    `quizpilot` works and creates `quizpilot.toml` the first time.
 3. Set the API key: `setx DEEPSEEK_API_KEY "sk-..."`, then reopen the shell.
