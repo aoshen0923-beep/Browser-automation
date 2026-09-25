@@ -135,7 +135,7 @@ class KB:
             self._delete_source(source)
 
     @_locked
-    def search(self, text: str, k: int = 8, module: str | None = None) -> list[Hit]:
+    def search(self, text: str, k: int = 8, module: str | None = None, kind: str | None = None) -> list[Hit]:
         query = fts_query(text)
         if not query:
             return []
@@ -149,6 +149,9 @@ class KB:
         if module:
             sql += " AND d.module = ?"
             args.append(module)
+        if kind:
+            sql += " AND d.kind = ?"
+            args.append(kind)
         sql += " ORDER BY s LIMIT ?"
         args.append(k)
         rows = self.db.execute(sql, args).fetchall()

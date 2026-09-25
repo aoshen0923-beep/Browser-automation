@@ -10,6 +10,7 @@ base, so the tool gets faster on questions it has researched before.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -28,7 +29,7 @@ from .solver import Answer, normalize_answer
 # Marks visible interactive elements with data-qp="N" and returns a compact
 # listing, so the model can say "click 12" instead of guessing selectors.
 SNAPSHOT_JS = r"""
-({maxItems, maxText}) => {
+({maxItems, maxText, prefix}) => {
   const visible = el => {
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return false;
@@ -38,13 +39,26 @@ SNAPSHOT_JS = r"""
   document.querySelectorAll('[data-qp]').forEach(e => e.removeAttribute('data-qp'));
   const sel = 'a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],' +
               '[role=tab],[role=menuitem],[role=option],[role=checkbox],[onclick],summary';
+  const all = [...document.querySelectorAll(sel)].filter(visible);
+  // Too many elements: keep form fields first, then content, then site chrome
+  // (nav/header/footer), so search results aren't cut off by menus.
+  const rank = el => {
+    const t = el.tagName;
+    if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA' || t === 'BUTTON') return 0;
+    return el.closest('nav,header,footer,[role=navigation],[role=banner],[role=contentinfo]') ? 2 : 1;
+  };
+  let chosen = all;
+  if (all.length > maxItems) {
+    const keep = new Set(all.map((el, i) => [rank(el), i, el]).sort((a, b) => a[0] - b[0] || a[1] - b[1])
+      .slice(0, maxItems).map(x => x[2]));
+    chosen = all.filter(el => keep.has(el));
+  }
   const items = [];
   let n = 0;
-  for (const el of document.querySelectorAll(sel)) {
-    if (n >= maxItems) break;
-    if (!visible(el)) continue;
+  for (const el of chosen) {
     n++;
-    el.setAttribute('data-qp', String(n));
+    const ref = prefix + n;
+    el.setAttribute('data-qp', ref);
     const tag = el.tagName.toLowerCase();
     const label = (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
                    el.getAttribute('title') || el.getAttribute('name') || '').trim().replace(/\s+/g, ' ').slice(0, 50);
@@ -55,23 +69,28 @@ SNAPSHOT_JS = r"""
       const h = el.getAttribute('href') || '';
       if (h && !h.startsWith('javascript') && !h.startsWith('#')) extra = ' -> ' + h.slice(0, 90);
     }
-    items.push(`[${n}] ${tag}${extra} "${label}"`);
+    items.push(`[${ref}] ${tag}${extra} "${label}"`);
   }
   const text = (document.body ? document.body.innerText : '').replace(/\n\s*\n+/g, '\n');
-  return {title: document.title, url: location.href, items, text: text.slice(0, maxText), textLength: text.length};
+  return {title: document.title, url: location.href, items, text: text.slice(0, maxText),
+          textLength: text.length, omitted: all.length - chosen.length};
 }
 """
 
-ACTIONS = """可用动作（每步只输出一个JSON对象）：
+ACTIONS = """每一步输出一个JSON对象：
+{"memory":"一两句话：已经确认了什么、下一步打算","actions":[动作1, 动作2, ...]}
+actions 最多3个，按顺序执行；会改变页面的动作（goto/search/click/back/带回车的type）之后的动作不再执行，
+所以把"输入+点击检索"这类组合放在同一步里能省时间。可用动作：
 {"action":"goto","url":"https://..."}                 打开网址（优先用下面目录里的官方网站）
 {"action":"search","query":"...","engine":"bing"}     用搜索引擎搜索（engine 可选 bing / baidu）
-{"action":"click","ref":12}                          点击编号为12的元素
+{"action":"click","ref":12}                          点击编号为12的元素（内嵌框架里的元素编号形如 "2-5"）
 {"action":"type","ref":5,"text":"...","enter":true}  在输入框5输入文字，enter=true 表示输入后按回车
 {"action":"select","ref":7,"option":"学位论文"}         在下拉框7中选择一个选项
 {"action":"find","text":"起草人"}                      在当前页面全文中查找关键词（页面很长时用）
 {"action":"pdf","url":"(可省略=当前页)","page":2,"find":"关键词"}  读取PDF：页数、指定页（负数从末尾算，-2=倒数第二页）、或查找关键词
 {"action":"back"}                                    返回上一页
-{"action":"answer","answer":"C","confidence":0.9,"reason":"一句话","evidence":"页面上看到的原文"}"""
+{"action":"answer","answer":"C","confidence":0.9,"reason":"一句话","evidence":"页面上看到的原文"}
+answer 的依据必须来自页面上看到的内容；没看到的不要编造，用较低的 confidence 表示。"""
 
 SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大赛查找客观题的答案。像熟练的真人一样高效操作。
 规则：
@@ -158,6 +177,9 @@ class Agent:
         self.log = log
         self.page: Page | None = None
         self._pdf_cache: dict[str, bytes] = {}
+        self._frames: dict[int, object] = {}
+        self._memory = ""
+        self._recipes: list[str] = []
         self._saved: set[str] = set()
 
     # --- page handling -------------------------------------------------------------
@@ -198,20 +220,49 @@ class Agent:
             await self._prepare(self.page)
             await self.page.bring_to_front()
 
+    async def _content_frames(self) -> list:
+        """Visible, reasonably sized iframes (search forms often live in one)."""
+        frames = []
+        for frame in self.page.frames[1:]:
+            if len(frames) >= 3:
+                break
+            try:
+                el = await frame.frame_element()
+                box = await el.bounding_box()
+            except Exception:
+                continue
+            if box and box["width"] >= 200 and box["height"] >= 100:
+                frames.append(frame)
+        return frames
+
     async def observe(self) -> str:
         page = self.page
         if self._is_pdf_url(page.url):
             return f"当前页是PDF：{page.url}\n用 pdf 动作读取。"
         try:
-            snap = await page.evaluate(SNAPSHOT_JS, {"maxItems": self.max_items, "maxText": self.max_text})
+            snap = await page.evaluate(SNAPSHOT_JS, {"maxItems": self.max_items, "maxText": self.max_text, "prefix": ""})
         except Exception as e:
             return f"读取页面失败：{e}"
+        self._frames = {}
+        parts = [
+            f"标题：{snap['title']}\n网址：{snap['url']}\n可操作元素：\n" + "\n".join(snap["items"]),
+        ]
+        if snap.get("omitted"):
+            parts.append(f"（另有{snap['omitted']}个导航/页脚元素未列出）")
+        texts = [snap["text"]]
+        for i, frame in enumerate(await self._content_frames(), start=1):
+            try:
+                fs = await frame.evaluate(SNAPSHOT_JS, {"maxItems": 30, "maxText": 1200, "prefix": f"{i}-"})
+            except Exception:
+                continue
+            self._frames[i] = frame
+            parts.append(f"\n内嵌框架{i}（{fs['url'][:80]}）的元素：\n" + "\n".join(fs["items"]))
+            texts.append(f"[内嵌框架{i}] {fs['text']}")
+            self._save(fs["url"], fs["title"], fs["text"])
         self._save(snap["url"], snap["title"], snap["text"])
-        return (
-            f"标题：{snap['title']}\n网址：{snap['url']}\n"
-            f"可操作元素：\n" + "\n".join(snap["items"]) +
-            f"\n\n页面文字（前{self.max_text}字，共{snap['textLength']}字）：\n{snap['text']}"
-        )
+        body = "\n".join(texts)
+        parts.append(f"\n页面文字（主页面共{snap['textLength']}字，这里是开头部分，长页面用 find 查找）：\n{body}")
+        return "\n".join(parts)
 
     def _save(self, url: str, title: str, text: str) -> None:
         if self.kb is None or not text.strip() or url in self._saved or url.startswith(("about:", "chrome")):
@@ -227,6 +278,13 @@ class Agent:
         return bool(re.search(r"\.pdf($|[?#])", url, re.I)) or "/pdf/" in url.lower()
 
     def _element(self, ref: object):
+        ref = str(ref).strip().strip("[]@")
+        if "-" in ref:  # "2-5" = element 5 inside iframe 2
+            frame_no = int(ref.split("-", 1)[0])
+            frame = self._frames.get(frame_no)
+            if frame is None:
+                raise ValueError(f"没有内嵌框架{frame_no}，请用最新的元素编号")
+            return frame.locator(f'[data-qp="{ref}"]').first
         return self.page.locator(f'[data-qp="{int(ref)}"]').first
 
     # --- actions -------------------------------------------------------------------
@@ -296,7 +354,12 @@ class Agent:
     async def find_text(self, needle: str) -> str:
         if not needle:
             return "find 需要 text"
-        text = await self.page.evaluate("() => document.body ? document.body.innerText : ''")
+        text = ""
+        for frame in [self.page.main_frame, *self._frames.values()]:
+            try:
+                text += "\n" + await frame.evaluate("() => document.body ? document.body.innerText : ''")
+            except Exception:
+                continue
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         hits = []
         for i, ln in enumerate(lines):
@@ -356,31 +419,79 @@ class Agent:
         if hints:
             parts.append("\n根据题目，最可能用到的官方网站（优先直接 goto 这些网址，不要先用搜索引擎）：")
             parts += [f"- 模块{s['module']} {s['title']}：{' '.join(s['urls'][:6])}" for s in hints]
+        if self._recipes:
+            parts.append("\n以前答对过的相似题的做法（可以照着做，网址和步骤可直接复用）：")
+            parts += [_clip(r, 700) for r in self._recipes]
         if steps:
             parts.append("\n已做的操作：")
             for i, s in enumerate(steps, 1):
                 parts.append(f"{i}. {json.dumps(s.action, ensure_ascii=False)} → {_clip(s.result, 300)}")
+        if self._memory:
+            parts.append(f"\n你上一步记下的要点：{self._memory}")
         parts.append(f"\n当前页面：\n{observation}")
         if force:
             parts.append("\n时间到了：现在必须输出 answer 动作，给出最可能的答案。")
         else:
-            parts.append(f"\n剩余时间约{remaining:.0f}秒。输出下一步动作的JSON。")
+            parts.append(f"\n剩余时间约{remaining:.0f}秒。输出下一步的JSON。")
         return "\n".join(parts)
 
-    async def _decide(self, q: Question, steps: list[Step], observation: str, remaining: float, force: bool) -> dict:
+    async def _decide(self, q: Question, steps: list[Step], observation: str, remaining: float, force: bool) -> list[dict]:
+        """The model's next actions (1-3); a single invalid marker on failure."""
         prompt = self._prompt(q, steps, observation, remaining, force)
         try:
-            action = await asyncio.to_thread(self.model.chat_json, self.system, prompt, 400)
+            reply = await asyncio.to_thread(self.model.chat_json, self.system, prompt, 400)
         except LLMError as e:
             self.log(f"  (model: {str(e)[:80]})")
             if "JSON" in str(e):
-                return {"action": "_invalid", "error": "上一步输出不是JSON，请只输出一个JSON动作"}
+                return [{"action": "_invalid", "error": "上一步输出不是JSON，请只输出一个JSON对象"}]
             # Timeouts and network hiccups: let the loop try again.
-            return {"action": "_invalid", "error": "模型请求失败，请直接给出下一步动作", "failed": True}
-        return action if isinstance(action, dict) else {"action": "_invalid", "error": "输出必须是JSON对象"}
+            return [{"action": "_invalid", "error": "模型请求失败，请直接给出下一步", "failed": True}]
+        if not isinstance(reply, dict):
+            return [{"action": "_invalid", "error": "输出必须是JSON对象"}]
+        if reply.get("memory"):
+            self._memory = str(reply["memory"])[:300]
+        acts = reply.get("actions")
+        if isinstance(acts, list):
+            acts = [a for a in acts if isinstance(a, dict) and a.get("action")][:3]
+        elif reply.get("action"):
+            acts = [reply]  # a bare single action is fine too
+        else:
+            acts = []
+        return acts or [{"action": "_invalid", "error": "没有给出动作，请输出 actions"}]
+
+    def _load_recipes(self, q: Question) -> None:
+        self._recipes = []
+        if self.kb is None:
+            return
+        try:
+            hits = self.kb.search(q.stem + " " + " ".join(q.options.values()), k=2, kind="recipe")
+        except Exception:
+            return
+        self._recipes = [h.text for h in hits if h.score > 5]
+
+    def _save_recipe(self, q: Question, steps: list[Step], final: dict, conf: float) -> None:
+        """Remember how a confidently answered question was solved."""
+        useful = [s for s in steps if s.action.get("action") not in ("（无效输出）",) and not s.result.startswith(("失败", "重复操作"))]
+        if self.kb is None or conf < 0.7 or not useful:
+            return
+        lines = [f"题目：{q.stem}"]
+        for i, s in enumerate(useful, 1):
+            a = {k: v for k, v in s.action.items() if k != "ref"}
+            lines.append(f"{i}. {json.dumps(a, ensure_ascii=False)}")
+        if final.get("evidence"):
+            lines.append(f"依据：{str(final['evidence'])[:200]}")
+        source = "recipe:" + hashlib.sha1(q.stem.encode("utf-8")).hexdigest()[:16]
+        try:
+            self.kb.add_document(source, [(None, "\n".join(lines))], title=f"做法：{q.stem[:40]}", kind="recipe", module="recipe")
+        except Exception:
+            pass
 
     async def run(self, q: Question, budget: float = 75, max_steps: int = 15, close: bool = False) -> LiveResult:
         start = time.monotonic()
+        self._memory = ""
+        self._load_recipes(q)
+        if self._recipes:
+            self.log(f"  (found {len(self._recipes)} saved approach(es) for similar questions)")
         self.page = await self._open_tab()
         await self.page.bring_to_front()
         steps: list[Step] = []
@@ -391,34 +502,46 @@ class Agent:
             for n in range(1, max_steps + 1):
                 elapsed = time.monotonic() - start
                 force = elapsed > budget - 6 or n == max_steps
-                action = await self._decide(q, steps, observation, budget - elapsed, force)
-                if action.get("action") != "answer" and force:
+                acts = await self._decide(q, steps, observation, budget - elapsed, force)
+                if force and not any(a.get("action") == "answer" for a in acts):
                     # Out of time or steps: insist on an answer once.
-                    action = await self._decide(q, steps, observation, 0, True)
-                if action.get("action") == "answer" or force:
-                    final = action
+                    acts = await self._decide(q, steps, observation, 0, True)
+                if force:
+                    final = next((a for a in acts if a.get("action") == "answer"), acts[0])
                     break
-                if action.get("action") == "_invalid":
-                    failures = failures + 1 if action.get("failed") else 0
+                if acts[0].get("action") == "_invalid":
+                    failures = failures + 1 if acts[0].get("failed") else 0
                     if failures >= 3:
                         self.log("  (model unavailable - giving up on live research)")
                         break
-                    steps.append(Step({"action": "（无效输出）"}, action.get("error", "")))
+                    steps.append(Step({"action": "（无效输出）"}, acts[0].get("error", "")))
                     continue
                 failures = 0
-                repeat = _repeats(action, steps)
-                if repeat:
-                    self.log(f"  [{n}] (skipped repeat) {_describe(action)}")
-                    steps.append(Step(action, f"重复操作，已跳过：{repeat}。换一个方法，比如打开目录中的官方网站、换关键词，或根据已有信息直接 answer。"))
-                    continue
-                self.log(f"  [{n}] {_describe(action)}")
-                try:
-                    result = await asyncio.wait_for(self.act(action), timeout=30)
-                except Exception as e:
-                    result = f"失败：{type(e).__name__}: {str(e).splitlines()[0][:150] if str(e) else ''}"
-                steps.append(Step(action, result))
-                if action.get("action") in ("find", "pdf"):
-                    observation = f"（仍在 {self.page.url}）\n{result}"
+                last_kind = None
+                for j, action in enumerate(acts):
+                    kind = action.get("action")
+                    if kind == "answer":
+                        final = action
+                        break
+                    label = f"[{n}{'abc'[j] if len(acts) > 1 else ''}]"
+                    repeat = _repeats(action, steps)
+                    if repeat:
+                        self.log(f"  {label} (skipped repeat) {_describe(action)}")
+                        steps.append(Step(action, f"重复操作，已跳过：{repeat}。换一个方法，比如打开目录中的官方网站、换关键词，或根据已有信息直接 answer。"))
+                        break
+                    self.log(f"  {label} {_describe(action)}")
+                    try:
+                        result = await asyncio.wait_for(self.act(action), timeout=30)
+                    except Exception as e:
+                        result = f"失败：{type(e).__name__}: {str(e).splitlines()[0][:150] if str(e) else ''}"
+                    steps.append(Step(action, result))
+                    last_kind = kind
+                    if result.startswith("失败") or kind in PAGE_CHANGING or (kind == "type" and action.get("enter")):
+                        break  # element numbers are stale now; look at the page again
+                if final is not None:
+                    break
+                if last_kind in ("find", "pdf"):
+                    observation = f"（仍在 {self.page.url}）\n{steps[-1].result}"
                 else:
                     observation = await self.observe()
         finally:
@@ -440,8 +563,13 @@ class Agent:
         reason = str(final.get("reason", ""))
         if final.get("evidence"):
             reason += f"  证据：{str(final['evidence'])[:200]}"
+        if answer:
+            self._save_recipe(q, steps, final, conf)
         ans = Answer(answer, conf, reason=reason, seconds=time.monotonic() - start)
         return LiveResult(ans, steps, urls)
+
+
+PAGE_CHANGING = {"goto", "search", "click", "back"}
 
 
 def _repeats(action: dict, steps: list[Step]) -> str:

@@ -219,7 +219,12 @@ quizpilot eval practice.txt --live --modules 11,12,24 --budget 60
 ```
 
 It prints the instant local answer first, so you have a fallback while the
-browser works. Every page and PDF it reads is saved to the knowledge base,
+browser works. Each step the model may chain up to three actions (for
+example type the query and click 检索), reads search forms inside iframes,
+and lists content before navigation menus on busy pages. When it answers a
+question with confidence 0.7 or more, the steps are saved as a recipe in
+the knowledge base; similar questions later start from that recipe, and
+recipes travel to teammates with `kb --export` / `--merge`. Every page and PDF it reads is saved to the knowledge base,
 so questions it has researched before answer faster next time. If a site
 shows a CAPTCHA or a login page, it beeps and waits for you.
 

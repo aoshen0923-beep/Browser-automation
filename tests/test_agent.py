@@ -55,6 +55,22 @@ def std_site(tmp_path):
         '<a href="std.pdf">查看全文</a>',
         encoding="utf-8",
     )
+    # A search form inside an iframe (common on government/database sites).
+    (tmp_path / "framed.html").write_text(
+        '<meta charset="utf-8"><title>外框</title><p>欢迎</p><iframe src="inner.html" width="600" height="300"></iframe>',
+        encoding="utf-8",
+    )
+    (tmp_path / "inner.html").write_text(
+        '<meta charset="utf-8"><form action="results.html" target="_top"><input type="text" name="q" placeholder="标准号">'
+        "<button>检索</button></form>",
+        encoding="utf-8",
+    )
+    # 150 navigation links before the one content link that matters.
+    nav = "".join(f'<a href="n{i}.html">栏目{i}</a>' for i in range(150))
+    (tmp_path / "busy.html").write_text(
+        f'<meta charset="utf-8"><nav>{nav}</nav><main><a href="std.pdf">GB/T 38880-2020 全文</a></main>',
+        encoding="utf-8",
+    )
     # A verification page that "gets solved" 1.5 s after loading.
     (tmp_path / "captcha.html").write_text(
         '<meta charset="utf-8"><title>安全验证</title><body>请完成安全验证</body>'
@@ -211,3 +227,67 @@ def test_captcha_wait_is_reported_and_research_continues(std_site, chrome, tmp_p
     assert result.answer.answer == "C"
     assert any("需要人机验证" in line for line in logs), logs
     assert any("验证已通过" in line for line in logs), logs
+
+
+def test_batched_actions_in_an_iframe_and_recipes(std_site, chrome):  # noqa: F811
+    """type + click in one step, inside an iframe; the solved approach is reused next time."""
+    prompts = []
+
+    class Batcher:
+        def chat_json(self, system, user, max_tokens=700):
+            prompts.append(user)
+            if "主要起草人" in user:
+                return {"memory": "找到起草人名单", "actions": [{"action": "answer", "answer": "C", "confidence": 0.9,
+                                                               "evidence": "本标准主要起草人：高尚荣、李桂梅、李建全"}]}
+            if "共2页" in user:
+                return {"actions": [{"action": "pdf", "page": 2}]}
+            m = re.search(r"\[(\d+)\] a -> std\.pdf", user)
+            if m:
+                return {"actions": [{"action": "click", "ref": int(m.group(1))}]}
+            m = re.search(r"\[(1-\d+)\] input type=text", user)
+            b = re.search(r"\[(1-\d+)\] button", user)
+            if m and b:
+                return {"memory": "在框架里的表单检索", "actions": [
+                    {"action": "type", "ref": m.group(1), "text": "GB/T 38880"},
+                    {"action": "click", "ref": b.group(1)},
+                    {"action": "goto", "url": "https://should-not-run.example"}]}
+            return {"actions": [{"action": "goto", "url": std_site + "/framed.html"}]}
+
+    logs = []
+
+    async def run(kb):
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, Batcher(), [], kb, log=logs.append)
+            return await agent.run(parse_question(QUESTION, "single"), budget=60, close=True)
+
+    with KB(":memory:") as kb:
+        result = asyncio.run(run(kb))
+        kinds = [s.action["action"] for s in result.steps]
+        assert result.answer.answer == "C", [(s.action, s.result[:60]) for s in result.steps]
+        assert kinds[:3] == ["goto", "type", "click"], kinds  # type+click ran in one step
+        assert "goto" not in kinds[3:] or all("should-not-run" not in str(s.action) for s in result.steps)
+        assert any("[2a]" in line for line in logs) and any("[2b]" in line for line in logs)
+        assert "你上一步记下的要点：在框架里的表单检索" in "\n".join(prompts)
+        # The approach was saved as a recipe and is offered for the same question next time.
+        recipes = kb.search(QUESTION, kind="recipe")
+        assert recipes and "framed.html" in recipes[0].text
+        prompts.clear()
+        asyncio.run(run(kb))
+        assert "以前答对过的相似题的做法" in prompts[0]
+
+
+def test_content_links_survive_busy_navigation(std_site, chrome):  # noqa: F811
+    class Reader:
+        def chat_json(self, system, user, max_tokens=700):
+            if "空白页" in user:
+                return {"action": "goto", "url": std_site + "/busy.html"}
+            assert "a -> std.pdf" in user, "content link was cut off by navigation links"
+            assert "导航/页脚元素未列出" in user
+            return {"action": "answer", "answer": "C", "confidence": 0.5}
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, Reader(), [], None, log=lambda *_: None)
+            return await agent.run(parse_question(QUESTION, "single"), budget=60, close=True)
+
+    assert asyncio.run(run()).answer.answer == "C"
