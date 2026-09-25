@@ -267,3 +267,29 @@ def launch_browser(cdp_url: str, profile_dir: Path, executable: str | None = Non
     ]
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
     return subprocess.Popen(args, creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def chrome_reachable(cdp_url: str) -> bool:
+    import httpx
+
+    try:
+        return httpx.get(cdp_url.rstrip("/") + "/json/version", timeout=1.5).status_code == 200
+    except Exception:
+        return False
+
+
+def ensure_chrome(cdp_url: str, profile_dir: Path, wait: float = 20.0) -> bool:
+    """Start the dedicated Chrome if nothing listens on the debugging port."""
+    if chrome_reachable(cdp_url):
+        return True
+    try:
+        launch_browser(cdp_url, profile_dir)
+    except Exception as e:
+        print(f"(could not start Chrome: {e})", flush=True)
+        return False
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        time.sleep(0.5)
+        if chrome_reachable(cdp_url):
+            return True
+    return False

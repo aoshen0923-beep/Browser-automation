@@ -366,6 +366,10 @@ def cmd_ask(args, cfg: Config) -> int:
     with asyncio.Runner() as runner, _open_kb(cfg) as kb:
         browser = None
         if args.live:
+            from .browser import ensure_chrome
+
+            if not ensure_chrome(cfg.browser.cdp_url, cfg.resolve(cfg.browser.profile_dir)):
+                raise RuntimeError(f"Can't start Chrome at {cfg.browser.cdp_url}. Try `quizpilot chrome`.")
             browser = Browser(cfg.browser.cdp_url)
             runner.run(browser.__aenter__())
         try:
@@ -445,6 +449,15 @@ def cmd_eval(args, cfg: Config) -> int:
             f"{stats['answered']} answered, score {stats['score']:+.0f} ({args.round} scoring); "
             f"avg {sum(stats['seconds']) / n:.1f}s per question"
         )
+    return 0
+
+
+def cmd_ui(args, cfg: Config) -> int:
+    from .ui import App
+
+    with _open_kb(cfg) as kb:
+        app = App(cfg, kb, _model(cfg), load_sites(), live_available=not args.no_live)
+        app.serve(port=args.port, open_browser=not args.no_open)
     return 0
 
 
@@ -535,6 +548,12 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("--modules", help="only these modules, e.g. 11,12,24")
             s.add_argument("--limit", type=int, help="only the first N questions")
         s.set_defaults(fn=fn)
+
+    s = sub.add_parser("ui", help="open the answering page in your browser (paste questions there)")
+    s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--no-open", action="store_true", help="don't open the page automatically")
+    s.add_argument("--no-live", action="store_true", help="local answers only, no Chrome research")
+    s.set_defaults(fn=cmd_ui)
 
     s = sub.add_parser("samples", help="extract the guide's sample questions into a practice file")
     s.add_argument("pdf")

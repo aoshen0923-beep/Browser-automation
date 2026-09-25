@@ -88,6 +88,37 @@ jobs:
           Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
           exit 0
 
+      - name: Smoke test the answering page (quizpilot ui)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Resolve-Path dist\quizpilot\quizpilot.exe
+          Set-Location smoke
+          $env:DEEPSEEK_API_KEY = "dummy"
+          $env:QUIZPILOT_BASE_URL = "http://127.0.0.1:9"
+          $p = Start-Process -FilePath $exe -ArgumentList "ui","--no-open","--no-live","--port","8799" -PassThru -NoNewWindow
+          $ok = $false
+          foreach ($i in 1..40) {
+            try { $st = Invoke-RestMethod http://127.0.0.1:8799/api/status; $ok = $true; break } catch { Start-Sleep -Milliseconds 500 }
+          }
+          if (-not $ok) { throw "answering page did not start" }
+          Write-Host "status: $($st | ConvertTo-Json -Compress)"
+          $html = (Invoke-WebRequest http://127.0.0.1:8799/ -UseBasicParsing).Content
+          if ($html -notmatch "quizpilot") { throw "page not served" }
+          $body = @{ question = "《儿童口罩技术规范》以下哪一位不是起草人？`nA、高尚荣`nB、李桂梅`nC、许伟民`nD、李建全"; round = "team"; live = $false } | ConvertTo-Json
+          $job = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8799/api/ask -Body ([Text.Encoding]::UTF8.GetBytes($body)) -ContentType "application/json; charset=utf-8"
+          if ($job.options -ne 4) { throw "question not parsed: $($job | ConvertTo-Json -Compress)" }
+          foreach ($i in 1..60) {
+            $full = Invoke-RestMethod "http://127.0.0.1:8799/api/jobs/$($job.id)"
+            if ($full.status -eq "done") { break }
+            Start-Sleep -Milliseconds 500
+          }
+          Write-Host "job: $($full | ConvertTo-Json -Compress -Depth 5)"
+          if ($full.status -ne "done") { throw "job never finished" }
+          if (-not $full.quick.error) { throw "expected the dead API endpoint to be reported as an error" }
+          Stop-Process -Id $p.Id -Force
+          exit 0
+
       - name: Smoke test the shell launcher outside the extracted folder
         shell: pwsh
         run: |
@@ -103,6 +134,7 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item scripts\quizpilot-shell.bat dist\quizpilot\
+          Copy-Item scripts\quizpilot-ui.bat dist\quizpilot\
           Copy-Item README.md dist\quizpilot\
           Compress-Archive -Path dist\quizpilot -DestinationPath quizpilot-windows.zip
 

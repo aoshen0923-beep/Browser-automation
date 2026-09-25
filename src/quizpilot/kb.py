@@ -7,7 +7,9 @@ live browsing session.
 
 from __future__ import annotations
 
+import functools
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +51,17 @@ class Hit:
         return f"{self.title or self.source}{where} <{self.source}>"
 
 
+def _locked(method):
+    """Serialize access: the web UI answers several questions at once."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class KB:
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -58,6 +71,7 @@ class KB:
         # browser drives the event loop; calls never overlap, so sharing the
         # connection across threads is safe.
         self.db = sqlite3.connect(str(path), check_same_thread=False)
+        self._lock = threading.RLock()
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(_SCHEMA)
 
@@ -70,6 +84,7 @@ class KB:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
+    @_locked
     def add_document(
         self,
         source: str,
@@ -114,10 +129,12 @@ class KB:
         self.db.execute("DELETE FROM chunks WHERE doc_id=?", (row[0],))
         self.db.execute("DELETE FROM docs WHERE id=?", (row[0],))
 
+    @_locked
     def remove(self, source: str) -> None:
         with self.db:
             self._delete_source(source)
 
+    @_locked
     def search(self, text: str, k: int = 8, module: str | None = None) -> list[Hit]:
         query = fts_query(text)
         if not query:
@@ -138,11 +155,13 @@ class KB:
         # bm25() is lower-is-better; flip the sign so higher means more relevant.
         return [Hit(r[0], r[1], r[2], r[3], r[4], r[5], -r[6]) for r in rows]
 
+    @_locked
     def stats(self) -> dict[str, int]:
         docs = self.db.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
         chunks = self.db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         return {"docs": docs, "chunks": chunks}
 
+    @_locked
     def documents(self, module: str | None = None) -> list[tuple[str, str, str, str]]:
         sql = "SELECT source, title, kind, module FROM docs"
         args: tuple = ()
@@ -151,6 +170,7 @@ class KB:
             args = (module,)
         return self.db.execute(sql + " ORDER BY added_at", args).fetchall()
 
+    @_locked
     def export(self, dest: Path | str) -> Path:
         """Write a consistent copy of the whole KB to one file for sharing."""
         dest = Path(dest)
@@ -164,6 +184,7 @@ class KB:
             out.close()
         return dest
 
+    @_locked
     def merge_from(self, path: Path | str) -> dict[str, int]:
         """Merge a teammate's exported KB; for the same source the newer copy wins."""
         other = sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro", uri=True)

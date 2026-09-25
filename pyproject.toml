@@ -25,7 +25,7 @@ quizpilot = "quizpilot.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-quizpilot = ["data/*.json", "data/*.toml"]
+quizpilot = ["data/*.json", "data/*.toml", "data/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

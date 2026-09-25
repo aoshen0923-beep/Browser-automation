@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>quizpilot 答题</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e3e6eb;
+  --accent: #2563eb; --accent-text: #ffffff; --good: #15803d; --good-bg: #dcfce7;
+  --skip: #92400e; --skip-bg: #fef3c7; --bad: #b91c1c; --bad-bg: #fee2e2; --code: #f1f3f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11151c; --panel: #1a2029; --text: #e6e9ef; --muted: #98a2b3; --line: #2b3340;
+    --accent: #3b82f6; --accent-text: #ffffff; --good: #4ade80; --good-bg: #143322;
+    --skip: #fbbf24; --skip-bg: #3a2c0c; --bad: #f87171; --bad-bg: #3b1616; --code: #222a35;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 20px 16px 60px; }
+header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+h1 { font-size: 20px; margin: 0; }
+.muted { color: var(--muted); font-size: 13px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+textarea { width: 100%; min-height: 150px; resize: vertical; border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px; font: inherit; background: var(--bg); color: var(--text); }
+textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 10px; }
+.controls label { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+select, input[type=number] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--text); }
+input[type=number] { width: 70px; }
+button { font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px; cursor: pointer;
+  background: var(--panel); color: var(--text); }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+.spacer { flex: 1; }
+#jobs { margin-top: 18px; display: grid; gap: 14px; }
+.job .stem { font-weight: 600; margin-bottom: 6px; overflow-wrap: anywhere; }
+.row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.big { font-size: 30px; font-weight: 700; letter-spacing: 2px; min-width: 64px; }
+.badge { border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 600; }
+.badge.good { background: var(--good-bg); color: var(--good); }
+.badge.skip { background: var(--skip-bg); color: var(--skip); }
+.badge.bad { background: var(--bad-bg); color: var(--bad); }
+.section { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.section h3 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+td { padding: 3px 6px; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+td.l { width: 26px; font-weight: 700; }
+.log { background: var(--code); border-radius: 8px; padding: 8px 10px; font: 12.5px/1.5 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; margin: 0; }
+a { color: var(--accent); overflow-wrap: anywhere; }
+.spinner { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent);
+  border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; vertical-align: -1px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.err { color: var(--bad); }
+@media (max-width: 600px) { .big { font-size: 24px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>quizpilot 答题</h1>
+    <span class="muted" id="status">连接中…</span>
+  </header>
+
+  <div class="panel">
+    <textarea id="q" placeholder="把题目连同 A–D 选项粘贴到这里，然后按「开始答题」或 Ctrl+Enter"></textarea>
+    <div class="controls">
+      <button id="paste" title="读取剪贴板并直接开始">粘贴并开始</button>
+      <label>比赛轮次
+        <select id="round">
+          <option value="individual">个人赛（+2 / −1）</option>
+          <option value="team" selected>团队赛（+4 / −1）</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="live" checked> 上网查找</label>
+      <label>每题最多 <input type="number" id="budget" min="10" max="600" step="5"> 秒</label>
+      <span class="spacer"></span>
+      <button class="primary" id="go">开始答题</button>
+    </div>
+  </div>
+
+  <div id="jobs"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+let status = null;
+const cards = new Map();   // job id -> element
+const running = new Set();
+
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem("qp-prefs") || "{}");
+    if (p.round) $("round").value = p.round;
+    if (typeof p.live === "boolean") $("live").checked = p.live;
+    if (p.budget) $("budget").value = p.budget;
+  } catch (e) {}
+}
+function savePrefs() {
+  try {
+    localStorage.setItem("qp-prefs", JSON.stringify({round: $("round").value, live: $("live").checked, budget: $("budget").value}));
+  } catch (e) {}
+}
+
+async function init() {
+  loadPrefs();
+  try {
+    status = await (await fetch("/api/status")).json();
+    $("status").textContent = `v${status.version} · 模型 ${status.model}` + (status.live_available ? "" : " · 仅本地作答");
+    if (!$("budget").value) $("budget").value = status.rounds[$("round").value].budget;
+    if (!status.live_available) { $("live").checked = false; $("live").disabled = true; }
+  } catch (e) {
+    $("status").textContent = "连接不上 quizpilot，请确认黑色窗口还开着";
+  }
+  const jobs = await (await fetch("/api/jobs")).json().catch(() => []);
+  for (const j of jobs.reverse()) track(j.id);
+}
+
+$("round").addEventListener("change", () => {
+  if (status) $("budget").value = status.rounds[$("round").value].budget;
+  savePrefs();
+});
+$("live").addEventListener("change", savePrefs);
+$("budget").addEventListener("change", savePrefs);
+
+async function submit(text) {
+  text = (text ?? $("q").value).trim();
+  if (text.length < 4) { $("q").focus(); return; }
+  $("go").disabled = true;
+  try {
+    const r = await fetch("/api/ask", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question: text, round: $("round").value, live: $("live").checked, budget: Number($("budget").value) || null})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.status);
+    $("q").value = "";
+    track(data.id);
+  } catch (e) {
+    alert("提交失败：" + e.message);
+  } finally {
+    $("go").disabled = false;
+    $("q").focus();
+  }
+}
+$("go").addEventListener("click", () => submit());
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); } });
+$("paste").addEventListener("click", async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    $("q").value = text;
+    submit(text);
+  } catch (e) {
+    $("q").focus();
+    alert("浏览器不允许读取剪贴板，请在输入框里按 Ctrl+V 粘贴。");
+  }
+});
+
+function track(id) {
+  if (cards.has(id)) return;
+  const el = document.createElement("div");
+  el.className = "panel job";
+  $("jobs").prepend(el);
+  cards.set(id, el);
+  running.add(id);
+  refresh(id);
+}
+
+function answerBlock(a, title, round) {
+  if (!a) return "";
+  if (a.error && !a.answer) return `<div class="section"><h3>${title}</h3><div class="err">${esc(a.error)}</div></div>`;
+  const badge = a.worth
+    ? `<span class="badge good">建议作答</span>`
+    : `<span class="badge skip">建议不答（把握不足 ${a.break_even}）</span>`;
+  const opts = a.options.map((o) => `<tr><td class="l">${esc(o.letter)}</td><td>${esc(o.text)}</td><td class="muted">${esc(o.note)}</td></tr>`).join("");
+  const links = [...a.sources.map((s) => `<div class="muted">知识库：${esc(s)}</div>`),
+    ...a.urls.map((u) => `<div><a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a></div>`)].join("");
+  return `<div class="section"><h3>${title}</h3>
+    <div class="row"><span class="big">${esc(a.answer || "?")}</span>${badge}
+      <span class="muted">置信度 ${a.confidence} · ${a.seconds}s</span></div>
+    ${a.reason ? `<div style="margin-top:6px">${esc(a.reason)}</div>` : ""}
+    ${opts ? `<table style="margin-top:8px">${opts}</table>` : ""}
+    ${links ? `<div style="margin-top:6px">${links}</div>` : ""}</div>`;
+}
+
+async function refresh(id) {
+  let j;
+  try { j = await (await fetch(`/api/jobs/${id}`)).json(); } catch (e) { return; }
+  const el = cards.get(id);
+  const kind = {single: "单选", multi: "多选", judge: "判断"}[j.kind] || j.kind;
+  const head = j.status === "running"
+    ? `<span class="spinner"></span> ${esc(j.phase)} · ${j.elapsed}s`
+    : `完成 · 用时 ${j.elapsed}s`;
+  el.innerHTML = `<div class="stem">#${j.id} ${esc(j.stem)}</div>
+    <div class="muted">${kind} · ${j.round === "team" ? "团队赛" : "个人赛"} · ${head}</div>
+    ${j.error ? `<div class="err" style="margin-top:6px">${esc(j.error)}</div>` : ""}
+    ${answerBlock(j.final, "上网查找后的答案", j.round)}
+    ${answerBlock(j.quick, j.final ? "本地快速答案" : "本地快速答案（上网查找进行中或未开启）", j.round)}
+    ${j.log.length ? `<div class="section"><h3>浏览器操作步骤</h3><pre class="log">${esc(j.log.join("\n"))}</pre></div>` : ""}`;
+  const log = el.querySelector(".log");
+  if (log) log.scrollTop = log.scrollHeight;
+  if (j.status === "done") running.delete(id);
+}
+
+setInterval(() => { for (const id of running) refresh(id); }, 800);
+init();
+$("q").focus();
+</script>
+</body>
+</html>

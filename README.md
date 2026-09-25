@@ -150,6 +150,20 @@ the tool says so, and the average seconds per question. Add your own
 practice questions to the file, separated by `---` lines and ending with
 `正确答案：...`.
 
+## Answering page (easiest)
+
+Double-click **`quizpilot-ui.bat`**. Your browser opens a local page
+(only this computer can reach it) and the dedicated Chrome starts by
+itself. Paste a question with its options, press **开始答题** or Ctrl+Enter,
+and watch:
+
+1. the instant local answer,
+2. each step of the live research in Chrome,
+3. the final answer with confidence, answer/skip advice and source links.
+
+Several questions can run at once, which suits the team round. From a
+terminal the same page is `quizpilot ui`.
+
 ## Contest mode
 
 ```powershell
