@@ -163,3 +163,22 @@ def test_suggest_sites_routes_to_the_right_module():
     assert top("在arXiv中找到arXiv identifier为2108.09800的文献") == "24"
     assert top("星河互联集团有限公司被列为失信被执行人") == "10"
     assert top("在剑桥数据库中找到名为《Big Data and Global Trade Law》的电子书") == "19"
+
+
+def test_repeated_goto_is_skipped(std_site, chrome):  # noqa: F811
+    class Looper:
+        n = 0
+
+        def chat_json(self, system, user, max_tokens=700):
+            Looper.n += 1
+            if Looper.n >= 4:
+                return {"action": "answer", "answer": "C", "confidence": 0.5}
+            return {"action": "goto", "url": std_site + "/index.html"}
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, Looper(), [], None, log=lambda *_: None)
+            return await agent.run(parse_question(QUESTION, "single"), budget=60, close=True)
+
+    result = asyncio.run(run())
+    assert [s.result.startswith("重复操作") for s in result.steps] == [False, True, True]

@@ -19,18 +19,41 @@ class ChatModel(Protocol):
     def chat_json(self, system: str, user: str, max_tokens: int = 700) -> dict: ...
 
 
+_PARTIAL_FIELDS = {
+    "answer": re.compile(r'"answer"\s*:\s*"([^"]*)"'),
+    "confidence": re.compile(r'"confidence"\s*:\s*([0-9.]+)'),
+    "action": re.compile(r'"action"\s*:\s*"([^"]*)"'),
+}
+
+
 def parse_json_reply(content: str) -> dict:
+    """Parse the first JSON object in a reply.
+
+    Tolerates code fences, text around the object, several objects in a row
+    (keeps the first) and a reply cut off mid-object, in which case the
+    answer/confidence fields that did arrive are salvaged ("_partial").
+    """
     content = content.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", content, re.S)
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.S)
     if fence:
         content = fence.group(1)
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        brace = re.search(r"\{.*\}", content, re.S)
-        if brace:
-            return json.loads(brace.group(0))
-        raise LLMError(f"model did not return JSON: {content[:200]}")
+    start = content.find("{")
+    if start >= 0:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(content[start:])
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+        salvaged = {}
+        for key, pat in _PARTIAL_FIELDS.items():
+            m = pat.search(content)
+            if m:
+                salvaged[key] = m.group(1)
+        if "answer" in salvaged:
+            salvaged["_partial"] = True
+            return salvaged
+    raise LLMError(f"model did not return JSON: {content[:200]}")
 
 
 class OpenAICompatible:
@@ -54,12 +77,25 @@ class OpenAICompatible:
         # Reasoning models can spend the whole token budget thinking and
         # return empty content; retry once with a much larger budget.
         budget = max(max_tokens, 1500)
+        salvaged: dict | None = None
         for attempt in range(2):
             content, finish = self._complete(system, user, budget)
             if content.strip():
-                return parse_json_reply(content)
-            budget *= 3
-        raise LLMError(f"model returned an empty reply (finish_reason={finish})")
+                try:
+                    reply = parse_json_reply(content)
+                except LLMError:
+                    if finish != "length":
+                        raise
+                    reply = None
+                if reply is not None and not reply.get("_partial"):
+                    return reply
+                salvaged = salvaged or reply
+                if finish != "length":
+                    break
+            budget *= 3  # cut off (usually by reasoning): retry with more room
+        if salvaged:
+            return salvaged
+        raise LLMError(f"model returned an empty or cut-off reply (finish_reason={finish})")
 
     def _complete(self, system: str, user: str, max_tokens: int) -> tuple[str, str]:
         body = {

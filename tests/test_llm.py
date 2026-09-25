@@ -62,5 +62,26 @@ def test_empty_twice_raises_clear_error():
         return httpx.Response(200, json={"choices": [{"message": {"content": ""}, "finish_reason": "length"}]})
 
     client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
-    with pytest.raises(LLMError, match="empty reply .*length"):
+    with pytest.raises(LLMError, match="empty or cut-off reply .*length"):
         client.chat_json("s", "u")
+
+
+def test_parse_json_reply_edge_cases_from_real_runs():
+    # Two objects in a row (seen live): keep the first.
+    assert parse_json_reply('{"action": "goto", "url": "a"}\n\n{"action": "click", "ref": 5}') == {"action": "goto", "url": "a"}
+    # Cut off mid-object (seen live): salvage answer and confidence.
+    cut = '{"answer":"C","confidence":0.25,"options":{"A":"unknown：证据未涉及","C":"true：常识'
+    got = parse_json_reply(cut)
+    assert got["answer"] == "C" and got["confidence"] == "0.25" and got["_partial"]
+
+
+def test_cut_off_reply_is_retried_then_salvaged():
+    calls = []
+
+    def handler(request):
+        calls.append(json.loads(request.content)["max_tokens"])
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"answer":"B","confidence":0.4,"options":{"A":"fa'}, "finish_reason": "length"}]})
+
+    client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
+    got = client.chat_json("s", "u")
+    assert got["answer"] == "B" and len(calls) == 2 and calls[1] == calls[0] * 3

@@ -38,7 +38,8 @@ SYSTEM = """你是信息素养大赛的答题助手。你会收到一道客观�
 4. answer 绝不能为空：即使没有把握也必须给出最可能的答案，用 confidence 表达把握程度（是否作答由程序根据 confidence 决定）。
 5. confidence 是"整个答案完全正确"的概率（0到1），要诚实，不要夸大。
 只输出JSON：
-{"answer": "AC", "confidence": 0.0, "options": {"A": "true|false|unknown：一句理由"}, "citations": [1], "reason": "一句话"}"""
+{"answer": "AC", "confidence": 0.0, "options": {"A": "true|false|unknown：不超过15字的理由"}, "citations": [1], "reason": "不超过30字"}
+answer 和 confidence 写在最前面。"""
 
 
 @dataclass

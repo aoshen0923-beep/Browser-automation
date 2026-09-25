@@ -401,6 +401,11 @@ class Agent:
                     steps.append(Step({"action": "（无效输出）"}, action.get("error", "")))
                     continue
                 failures = 0
+                repeat = _repeats(action, steps)
+                if repeat:
+                    self.log(f"  [{n}] (skipped repeat) {_describe(action)}")
+                    steps.append(Step(action, f"重复操作，已跳过：{repeat}。换一个方法，比如打开目录中的官方网站、换关键词，或根据已有信息直接 answer。"))
+                    continue
                 self.log(f"  [{n}] {_describe(action)}")
                 try:
                     result = await asyncio.wait_for(self.act(action), timeout=30)
@@ -432,6 +437,19 @@ class Agent:
             reason += f"  证据：{str(final['evidence'])[:200]}"
         ans = Answer(answer, conf, reason=reason, seconds=time.monotonic() - start)
         return LiveResult(ans, steps, urls)
+
+
+def _repeats(action: dict, steps: list[Step]) -> str:
+    """A goto/search identical to an earlier one only loops; say which."""
+    kind = action.get("action")
+    key = {"goto": "url", "search": "query"}.get(kind)
+    if not key:
+        return ""
+    value = str(action.get(key, "")).strip().rstrip("/")
+    for s in steps:
+        if s.action.get("action") == kind and str(s.action.get(key, "")).strip().rstrip("/") == value:
+            return f"之前已经{'打开过这个网址' if kind == 'goto' else '搜索过同样的关键词'}"
+    return ""
 
 
 def _describe(a: dict) -> str:
