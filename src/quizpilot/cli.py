@@ -235,17 +235,9 @@ def _read_question() -> str | None:
 
 
 def _clipboard() -> str:
-    try:
-        import tkinter
+    from .console import read_clipboard
 
-        root = tkinter.Tk()
-        root.withdraw()
-        try:
-            return root.clipboard_get().strip()
-        finally:
-            root.destroy()
-    except Exception:
-        return ""
+    return read_clipboard()
 
 
 def _print_answer(q, ans, round_name: str, urls: list[str] | None = None, title: str = "") -> None:
@@ -305,6 +297,39 @@ async def _answer_one(q, kb, model, cfg: Config, args, browser=None) -> None:
     _print_answer(q, result.answer, args.round, urls=result.urls, title="live answer from the web")
 
 
+def _use_watch(args) -> bool:
+    """Clipboard watching in a real Windows console unless --paste is given."""
+    return not args.paste and sys.platform == "win32" and sys.stdin.isatty()
+
+
+def _pasted_questions():
+    while True:
+        raw = _read_question()
+        if raw is None:
+            print("(input closed - exiting)")
+            return
+        yield raw
+
+
+def _watch_clipboard(interval: float = 0.3):
+    """Yield each newly copied question. Ctrl+C ends the session."""
+    from .console import disable_quick_edit, looks_like_question, read_clipboard
+
+    disable_quick_edit()
+    print("\n>>> Ready. Copy a question with its options (Ctrl+C on the exam page).")
+    print(">>> Answering starts automatically. Press Ctrl+C in this window to quit.", flush=True)
+    last = read_clipboard()  # ignore whatever was copied before we started
+    while True:
+        time.sleep(interval)
+        text = read_clipboard()
+        if not text or text == last:
+            continue
+        last = text
+        if looks_like_question(text):
+            print("\n" + "-" * 60 + f"\n{text}\n" + "-" * 60, flush=True)
+            yield text
+
+
 def cmd_ask(args, cfg: Config) -> int:
     from .browser import Browser
     from .question import parse_question
@@ -323,19 +348,18 @@ def cmd_ask(args, cfg: Config) -> int:
                 q = parse_question(" ".join(args.question), args.kind)
                 runner.run(_answer_one(q, kb, model, cfg, args, browser))
                 return 0
-            while True:
-                raw = _read_question()
-                if raw is None:
-                    print("(input closed - exiting)")
-                    break
+            questions = _watch_clipboard() if _use_watch(args) else _pasted_questions()
+            for raw in questions:
                 q = parse_question(raw, args.kind)
-                print(f"-> {q.kind}, {len(q.options)} options")
+                print(f"-> {q.kind}, {len(q.options)} options", flush=True)
                 try:
                     runner.run(_answer_one(q, kb, model, cfg, args, browser))
                 except KeyboardInterrupt:
                     print("\n(stopped this question)")
                 except Exception as e:  # keep the session alive for the next question
                     print(f"\n!! {type(e).__name__}: {e}")
+                if _use_watch(args):
+                    print("\n>>> Copy the next question (Ctrl+C here to quit).", flush=True)
         except KeyboardInterrupt:
             print()
         finally:
@@ -477,6 +501,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "ask":
             s.add_argument("question", nargs="*", help="question text (omit for interactive mode)")
             s.add_argument("--kind", choices=["single", "multi", "judge"], help="override the detected type")
+            s.add_argument("--paste", action="store_true", help="type/paste questions here instead of watching the clipboard")
         else:
             s.add_argument("file")
             s.add_argument("--modules", help="only these modules, e.g. 11,12,24")

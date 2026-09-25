@@ -156,8 +156,9 @@ practice questions to the file, separated by `---` lines and ending with
 quizpilot ask --round individual
 ```
 
-Copy the question and its options from the exam page, then press Enter on
-an empty line to read the clipboard. You can also paste the text directly.
+On Windows, just copy the question with its options on the exam page
+(Ctrl+C): answering starts automatically, with nothing to paste into the
+console. Use `--paste` to type or paste questions into the console instead.
 
 ```
 ============================================================
