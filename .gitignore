@@ -10,3 +10,4 @@ kb/
 downloads/
 chrome-profile/
 *.sqlite
+runs/

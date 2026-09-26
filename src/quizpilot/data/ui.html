@@ -114,6 +114,7 @@ header { flex-wrap: wrap; }
       <label><input type="checkbox" id="live" checked> 上网查找</label>
       <label>每题最多 <input type="number" id="budget" min="10" max="600" step="5"> 秒</label>
       <span class="spacer"></span>
+      <a href="/api/runs/export" title="最近3天每道题的完整记录（AI看到的页面、每一步操作和结果、用时），发给开发者排查问题"><button>导出运行记录</button></a>
       <button class="primary" id="go">开始答题</button>
     </div>
   </div>

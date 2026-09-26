@@ -171,5 +171,18 @@ def test_grading_on_the_answering_page(std_site, chrome, tmp_path):  # noqa: F81
         practice = "中国国家标准的代号是？\nA、GB\nB、ISO\nC、ANSI\nD、JIS\n正确答案：A"
         graded = ask(practice, live=False)
         assert graded["feedback"]["right"] is True and graded["expected"] == "A"
+        # Every question leaves a run record; the page exports them as one zip.
+        import io
+        import urllib.request
+        import zipfile
+
+        data = urllib.request.urlopen(base + "/api/runs/export", timeout=10).read()
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            records = [json.loads(z.read(n)) for n in z.namelist()]
+        first_rec = next(r for r in records if r["id"] == first["id"])
+        assert first_rec["feedback"]["correct"] == "C" and first_rec["question"].startswith("《儿童口罩")
+        kinds = [e["type"] for e in first_rec["trace"]]
+        assert "model" in kinds and "action" in kinds
+        assert any("网址" in e.get("prompt", "") for e in first_rec["trace"])
         app.loop.call_soon_threadsafe(app.loop.stop)
         t.join(10)

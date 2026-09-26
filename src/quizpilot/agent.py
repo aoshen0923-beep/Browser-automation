@@ -542,6 +542,7 @@ class Agent:
         self._prepared: set = set()
         self._rendered = ""
         self._downloads: list[str] = []
+        self.trace: list[dict] = []  # everything the model saw and did, for the run record
         self._window_end = 0
         self._seen: list[str] = []
         self._checked_evidence = False
@@ -1187,9 +1188,14 @@ class Agent:
     async def _decide(self, q: Question, steps: list[Step], observation: str, remaining: float, force: bool) -> list[dict]:
         """The model's next actions (1-3); a single invalid marker on failure."""
         prompt = self._prompt(q, steps, observation, remaining, force)
+        t0 = time.monotonic()
+        entry = {"t": round(time.time(), 1), "type": "model", "prompt": prompt}
+        self.trace.append(entry)
         try:
             reply = await asyncio.to_thread(self.model.chat_json, self.system, prompt, 400)
+            entry.update(reply=reply, seconds=round(time.monotonic() - t0, 1))
         except LLMError as e:
+            entry.update(error=str(e), seconds=round(time.monotonic() - t0, 1))
             self.log(f"  (model: {str(e)[:80]})")
             if "JSON" in str(e):
                 return [{"action": "_invalid", "error": "上一步输出不是JSON，请只输出一个JSON对象"}]
@@ -1396,11 +1402,16 @@ class Agent:
                         steps.append(Step(action, f"重复操作，已跳过：{repeat}。换一个方法，比如打开目录中的官方网站、换关键词，或根据已有信息直接 answer。"))
                         break
                     self.log(f"  {label} {_describe(action)}")
+                    t_act = time.monotonic()
                     try:
                         result = await self._interruptible(
                             asyncio.wait_for(self.act(action), timeout=120 if kind in ("flow", "open_many") else 60))
                     except Exception as e:
                         result = f"失败：{type(e).__name__}: {str(e).splitlines()[0][:150] if str(e) else ''}"
+                    self.trace.append({"t": round(time.time(), 1), "type": "action", "action": action,
+                                       "result": result if isinstance(result, str) else "被用户打断",
+                                       "seconds": round(time.monotonic() - t_act, 1),
+                                       "url": self.page.url if self.page is not None and not self.page.is_closed() else ""})
                     if result is _INTERRUPTED:
                         steps.append(Step(action, "被用户打断"))
                         interrupted = True

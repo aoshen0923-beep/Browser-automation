@@ -167,6 +167,7 @@ class App:
             job.status = "done"
             job.phase = "完成"
             job.finished = time.time()
+            self.save_record(job)
 
     async def _run(self, job: Job) -> None:
         try:
@@ -184,9 +185,36 @@ class App:
             job.status = "done"
             job.phase = "完成"
             job.finished = time.time()
+            self.save_record(job)
         if job.q.expected and job.feedback is None:
             # A practice question pasted with its answer key grades itself.
             await self._grade(job, job.q.expected)
+
+    def save_record(self, job: Job) -> None:
+        """Write the whole run of a question to runs/<date>/ (sent to the developer to diagnose problems)."""
+        try:
+            day = time.strftime("%Y-%m-%d", time.localtime(job.started))
+            folder = self.cfg.resolve("runs") / day
+            folder.mkdir(parents=True, exist_ok=True)
+            record = {"version": __version__, "model": self.cfg.llm.model, "question": job.raw, **job.full(),
+                      "trace": list(getattr(job.agent, "trace", []) or [])}
+            name = f"{time.strftime('%H%M%S', time.localtime(job.started))}-q{job.id}.json"
+            (folder / name).write_text(json.dumps(record, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        except Exception as e:
+            print(f"(couldn't save the run record: {e})", flush=True)
+
+    def export_records(self, days: int = 3) -> bytes:
+        """Recent run records as one zip."""
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        root = self.cfg.resolve("runs")
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for folder in sorted(p for p in root.glob("*") if p.is_dir())[-days:]:
+                for f in sorted(folder.glob("*.json")):
+                    z.write(f, f"{folder.name}/{f.name}")
+        return buf.getvalue()
 
     def grade(self, job: Job, correct: str) -> None:
         """答对了 / 答错了: remember the answer, the approach or the lesson."""
@@ -210,6 +238,7 @@ class App:
             job.feedback = await asyncio.to_thread(memory.learn, self.kb, self.model, job.q, given, correct, steps, final)
         except Exception as e:
             job.feedback = {"error": str(e)}
+        self.save_record(job)
 
     async def _live(self, job: Job) -> None:
         from .agent import Agent
@@ -400,6 +429,16 @@ class App:
                 if self.path == "/api/kb":
                     return self._json({**app.kb.overview(), "task": app.kb_task_state(),
                                        "module_titles": {x["module"]: x["title"] for x in app.sites}})
+                if self.path == "/api/runs/export":
+                    data = app.export_records()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/zip")
+                    self.send_header("Content-Disposition",
+                                     f'attachment; filename="quizpilot-runs-{time.strftime("%Y%m%d-%H%M")}.zip"')
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return None
                 if self.path == "/api/kb/export":
                     import tempfile
 
