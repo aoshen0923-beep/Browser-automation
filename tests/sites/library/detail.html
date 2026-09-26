@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8"><title>论文详情</title>
+<style> body { margin: 0; height: 100vh; overflow: hidden; } #box { height: 250px; overflow: auto; border: 1px solid #ccc; } </style>
+<h2 id="title"></h2>
+<div id="box"><div id="content"></div></div>
+<script>
+  const id = new URLSearchParams(location.search).get("id");
+  document.getElementById("title").innerText = id === "17" ? "基于深度学习的儿童口罩佩戴检测研究" : "其他论文";
+  const content = document.getElementById("content");
+  content.innerHTML = "<p>摘要：本文研究儿童口罩佩戴检测。</p>" + Array.from({length: 30}, (_, i) => `<p>正文段落${i + 1}</p>`).join("");
+  // The funding line only loads once the reader scrolls the panel to its end.
+  const box = document.getElementById("box");
+  let loaded = false;
+  box.addEventListener("scroll", () => {
+    if (!loaded && box.scrollTop + box.clientHeight >= box.scrollHeight - 20) {
+      loaded = true;
+      setTimeout(() => content.insertAdjacentHTML("beforeend",
+        `<p>基金项目：国家自然科学基金(${id === "17" ? "61876543" : "00000000"})</p>`), 300);
+    }
+  });
+</script>

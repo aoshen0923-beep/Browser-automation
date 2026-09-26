@@ -27,56 +27,288 @@ from .llm import ChatModel, LLMError, VisionUnsupported
 from .question import JUDGE, MULTI, SINGLE, Question
 from .solver import Answer, normalize_answer
 
-# Marks visible interactive elements with data-qp="N" and returns a compact
-# listing, so the model can say "click 12" instead of guessing selectors.
-SNAPSHOT_JS = r"""
-({maxItems, maxText, prefix}) => {
-  const visible = el => {
-    const r = el.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return false;
-    const s = getComputedStyle(el);
-    return s.visibility !== 'hidden' && s.display !== 'none';
+# Renders the visible page as text in reading order, with each interactive
+# element marked in place: "GB/T 38880-2020 儿童口罩 [12]<a>查看全文</a>". The
+# model sees which link belongs to which result. Elements keep their number
+# (data-qp) across observations, so a number read earlier still clicks the
+# same element. Dialogs come first; long menus are moved to the end.
+RENDER_JS = r"""
+({prefix, navCap}) => {
+  const MAX = 200000;
+  const SKIP = new Set(['SCRIPT','STYLE','NOSCRIPT','TEMPLATE','IFRAME','FRAME','OBJECT','EMBED','CANVAS','SVG','svg','HEAD','LINK','META']);
+  const BLOCK = new Set(['ADDRESS','ARTICLE','ASIDE','BLOCKQUOTE','BR','CAPTION','DD','DETAILS','DIALOG','DIV','DL','DT','FIELDSET',
+    'FIGCAPTION','FIGURE','FOOTER','FORM','H1','H2','H3','H4','H5','H6','HEADER','HR','LI','MAIN','NAV','OL','P','PRE','SECTION',
+    'TABLE','TBODY','TFOOT','THEAD','TR','UL','LEGEND']);
+  const INTERACTIVE = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=tab],' +
+    '[role=menuitem],[role=option],[role=checkbox],[role=radio],[role=switch],[role=treeitem],[onclick],[contenteditable=""],[contenteditable=true]';
+  const NAV = 'nav,header,footer,[role=navigation],[role=banner],[role=contentinfo],[class*=nav i],[id*=nav i],' +
+    '[class*=menu i],[id*=menu i],[class*=header i],[id*=header i],[class*=footer i],[id*=footer i]';
+  const DIALOG = 'dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true],.modal.show,.modal.in,.layui-layer,' +
+    '.el-dialog__wrapper,.el-message-box__wrapper,.ant-modal-wrap';
+  const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const ptr = el => !!el && el !== document.body && el !== document.documentElement && getComputedStyle(el).cursor === 'pointer';
+  const shown = el => {
+    if (el.checkVisibility) return el.checkVisibility({checkVisibilityCSS: true, visibilityProperty: true});
+    const st = getComputedStyle(el);
+    return st.display !== 'none' && st.visibility !== 'hidden' && el.getClientRects().length > 0;
   };
-  document.querySelectorAll('[data-qp]').forEach(e => e.removeAttribute('data-qp'));
-  const sel = 'a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],' +
-              '[role=tab],[role=menuitem],[role=option],[role=checkbox],[onclick],summary';
-  const all = [...document.querySelectorAll(sel)].filter(visible);
-  // Too many elements: keep form fields first, then content, then site chrome
-  // (nav/header/footer), so search results aren't cut off by menus.
-  const rank = el => {
-    const t = el.tagName;
-    if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA' || t === 'BUTTON') return 0;
-    return el.closest('nav,header,footer,[role=navigation],[role=banner],[role=contentinfo]') ? 2 : 1;
+  let next = window.__qpNext || 1;
+  const used = new Set();
+  const refOf = el => {
+    let r = el.getAttribute('data-qp');
+    const mine = r && (prefix ? r.startsWith(prefix) : !r.includes('-'));
+    if (!mine || used.has(r)) { r = prefix + (next++); el.setAttribute('data-qp', r); }
+    used.add(r);
+    return r;
   };
-  let chosen = all;
-  if (all.length > maxItems) {
-    const keep = new Set(all.map((el, i) => [rank(el), i, el]).sort((a, b) => a[0] - b[0] || a[1] - b[1])
-      .slice(0, maxItems).map(x => x[2]));
-    chosen = all.filter(el => keep.has(el));
-  }
-  const items = [];
-  let n = 0;
-  for (const el of chosen) {
-    n++;
-    const ref = prefix + n;
-    el.setAttribute('data-qp', ref);
+  const labelOf = el => {
+    const img = el.querySelector && el.querySelector('img[alt],img[title]');
+    return clean(el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') ||
+                 el.getAttribute('alt') || (img && (img.alt || img.title)) || el.getAttribute('placeholder') || '').slice(0, 80);
+  };
+  const state = el => (el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-checked') === 'true' ||
+    el.getAttribute('aria-current') && el.getAttribute('aria-current') !== 'false' ||
+    /(^|\s)(active|current|cur|on|selected)(\s|$)/i.test(el.className || '')) ? ' 当前' : '';
+  const atom = el => {
     const tag = el.tagName.toLowerCase();
-    const label = (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
-                   el.getAttribute('title') || el.getAttribute('name') || '').trim().replace(/\s+/g, ' ').slice(0, 50);
-    let extra = '';
-    if (tag === 'input') extra = ' type=' + (el.type || 'text') + (el.checked ? ' checked' : '');
-    if (tag === 'select') extra = ' options=' + [...el.options].map(o => o.text.trim()).slice(0, 12).join('|');
-    if (tag === 'a') {
-      const h = el.getAttribute('href') || '';
-      if (h && !h.startsWith('javascript') && !h.startsWith('#')) extra = ' -> ' + h.slice(0, 90);
+    const ref = refOf(el);
+    if (tag === 'input') {
+      const t = (el.type || 'text').toLowerCase();
+      if (t === 'checkbox' || t === 'radio') return `[${ref}]<input type=${t}${el.checked ? ' checked' : ''}>`;
+      if (['button', 'submit', 'reset', 'image'].includes(t)) return `[${ref}]<button>${clean(el.value || el.alt || el.title || t)}</button>`;
+      let s = `[${ref}]<input type=${t}`;
+      const ph = clean(el.placeholder || el.getAttribute('aria-label') || el.title || '');
+      if (ph) s += ` placeholder="${ph.slice(0, 40)}"`;
+      if (el.value) s += ` value="${clean(el.value).slice(0, 60)}"`;
+      return s + '>';
     }
-    items.push(`[${ref}] ${tag}${extra} "${label}"`);
+    if (tag === 'textarea') return `[${ref}]<textarea${el.value ? ` value="${clean(el.value).slice(0, 60)}"` : ''}>`;
+    if (tag === 'select') {
+      const opts = [...el.options].map(o => clean(o.text));
+      const sel = el.selectedOptions && el.selectedOptions[0];
+      return `[${ref}]<select 已选="${sel ? clean(sel.text) : ''}" 选项=${opts.slice(0, 40).join('|')}${opts.length > 40 ? '|…' : ''}>`;
+    }
+    const role = el.getAttribute('role');
+    const name = tag === 'a' || role === 'link' ? 'a' : tag === 'button' || role === 'button' ? 'button' : (role || tag);
+    let label = labelOf(el);
+    const href = tag === 'a' ? (el.getAttribute('href') || '') : '';
+    const file = /\.(pdf|docx?|xlsx?|pptx?|caj|zip|rar)([?#]|$)/i.test(href);
+    if (!label && href && !href.startsWith('javascript')) label = href.split('?')[0].split('/').filter(Boolean).pop() || href;
+    return `[${ref}]<${name}${file ? ' href=' + href.slice(0, 90) : ''}${state(el)}>${label || '(无文字)'}</${name}>`;
+  };
+
+  const out = [];
+  let size = 0;
+  const extra = [];
+  const push = s => { if (size < MAX) { out.push(s); size += s.length; } };
+  const box = window.__qpScrollBox && window.__qpScrollBox.isConnected ? window.__qpScrollBox : null;
+  const vpTop = box ? box.getBoundingClientRect().top : 0;
+  let marked = false;
+  const mark = el => {
+    if (marked || !el || (box && !box.contains(el))) return;
+    const r = el.getBoundingClientRect();
+    if (r.bottom > vpTop + 1 && r.height > 0) { marked = true; push('\u0001'); }
+  };
+  const skipDialogs = new Set();
+  let nav = null;  // {count, hidden} while inside a menu/header/footer region
+
+  const walk = (node, inAtomParent) => {
+    if (size >= MAX) return;
+    if (node.nodeType === 3) {
+      const t = node.textContent.replace(/\s+/g, ' ');
+      if (t.trim()) { mark(node.parentElement); push(t); }
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const el = node;
+    if (SKIP.has(el.tagName) || skipDialogs.has(el)) return;
+    if (!shown(el)) return;
+    const block = BLOCK.has(el.tagName);
+    const hard = el.matches(INTERACTIVE) || typeof el.onclick === 'function';
+    // Script-driven widgets (custom dropdowns, tabs): the outermost element with a hand cursor.
+    if (!hard && ptr(el) && !ptr(el.parentElement)) {
+      const ref = refOf(el);
+      mark(el);
+      if (!clean(el.innerText)) { push(` [${ref}]<button>${labelOf(el) || '(图标)'}</button> `); return; }
+      push(`${block ? '\n' : ' '}[${ref}]<button${state(el)}>`);
+      for (const c of el.childNodes) walk(c);
+      if (el.shadowRoot) for (const c of el.shadowRoot.childNodes) walk(c);
+      push(`</button>${block ? '\n' : ' '}`);
+      return;
+    }
+    if (hard) {
+      const tag = el.tagName;
+      const r = el.getBoundingClientRect();
+      const tiny = r.width < 1 && r.height < 1 && tag !== 'INPUT';
+      const container = !['INPUT', 'SELECT', 'TEXTAREA'].includes(tag) &&
+        (el.querySelector(INTERACTIVE) || clean(el.innerText).length > 80);
+      if (!tiny && !container) {
+        mark(el);
+        const s = atom(el);
+        if (nav && ++nav.count > navCap) { nav.hidden++; extra.push(s); }
+        else push((block ? '\n' : ' ') + s + (block ? '\n' : ' '));
+        return;
+      }
+      if (container) {
+        const ref = refOf(el);
+        mark(el);
+        push(`${block ? '\n' : ' '}[${ref}]<${tag === 'A' ? 'a' : 'button'}${state(el)}>`);
+        for (const c of el.childNodes) walk(c);
+        if (el.shadowRoot) for (const c of el.shadowRoot.childNodes) walk(c);
+        push(`</${tag === 'A' ? 'a' : 'button'}>${block ? '\n' : ' '}`);
+        return;
+      }
+    }
+    let entered = false;
+    if (!nav && el.matches(NAV) && el !== document.body && el !== document.documentElement) {
+      nav = {count: 0, hidden: 0};
+      entered = true;
+    }
+    if (block) push('\n');
+    if (el.tagName === 'IMG' && el.alt) push(` [图:${clean(el.alt).slice(0, 40)}] `);
+    for (const c of el.childNodes) walk(c);
+    if (el.shadowRoot) for (const c of el.shadowRoot.childNodes) walk(c);
+    if (el.tagName === 'TD' || el.tagName === 'TH') push(' | ');
+    if (block) push('\n');
+    if (entered) {
+      if (nav.hidden) push(` （…另有${nav.hidden}个菜单/导航链接，放在页面文字末尾）\n`);
+      nav = null;
+    }
+  };
+
+  const root = document.body || document.documentElement;
+  const dialogs = [...document.querySelectorAll(DIALOG)].filter(d => shown(d) && d.getBoundingClientRect().height > 20);
+  if (dialogs.length) {
+    push('【页面上弹出的对话框】\n');
+    for (const d of dialogs) { if (![...skipDialogs].some(x => x.contains(d))) { walk(d); skipDialogs.add(d); } }
+    push('\n【对话框结束，下面是页面】\n');
   }
-  const text = (document.body ? document.body.innerText : '').replace(/\n\s*\n+/g, '\n');
-  return {title: document.title, url: location.href, items, text: text.slice(0, maxText),
-          textLength: text.length, omitted: all.length - chosen.length};
+  if (root) walk(root);
+  window.__qpNext = next;
+  if (extra.length) push('\n【菜单/导航链接】 ' + extra.join(' '));
+  let text = out.join('').replace(/[ \t ]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{2,}/g, '\n').replace(/( \| ){2,}/g, ' | ');
+  let vp = text.indexOf('\u0001');
+  text = text.replace('\u0001', '');
+  const se = document.scrollingElement || document.documentElement;
+  const sb = box || se;
+  return {title: document.title, url: location.href, text: text.trim(), vp: Math.max(0, vp),
+          scroll: {y: sb.scrollTop, h: sb.scrollHeight, v: box ? box.clientHeight : innerHeight}};
 }
 """
+
+SIGNATURE_JS = r"""
+() => {
+  const t = document.body ? document.body.innerText : '';
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+  return [location.href, t.length, h, document.querySelectorAll(':checked').length,
+          document.querySelectorAll('[aria-expanded=true],[aria-selected=true]').length].join('|');
+}
+"""
+
+# [text length, whether a "loading…" indicator is showing]
+LOADING_JS = r"""
+() => {
+  const body = document.body || document.documentElement;
+  const vis = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  let n, i = 0, loading = false;
+  while ((n = w.nextNode()) && i++ < 20000) {
+    const s = n.textContent.trim();
+    if (s.length < 20 && /^(正在加载|加载中|数据加载中|正在检索|检索中|正在查询|请稍候|请稍等|loading)[\s.。…]*$/i.test(s) && vis(n.parentElement)) {
+      loading = true;
+      break;
+    }
+  }
+  if (!loading) loading = [...document.querySelectorAll('.el-loading-mask,.layui-layer-loading,.ant-spin-spinning,.loading-mask')].some(vis);
+  return [(document.body ? document.body.innerText : '').length, loading];
+}
+"""
+
+SCROLL_JS = r"""
+(dir) => {
+  const se = document.scrollingElement || document.documentElement;
+  const can = el => el.scrollHeight > el.clientHeight + 20;
+  let target = se;
+  if (!can(se)) {
+    let best = null, area = 0;
+    for (const el of document.querySelectorAll('body *')) {
+      if (!can(el)) continue;
+      const oy = getComputedStyle(el).overflowY;
+      if (oy !== 'auto' && oy !== 'scroll') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width * r.height > area) { area = r.width * r.height; best = el; }
+    }
+    if (best) target = best;
+  }
+  window.__qpScrollBox = target === se ? null : target;
+  const view = target === se ? innerHeight : target.clientHeight;
+  const before = target.scrollTop;
+  if (dir === 'top') target.scrollTop = 0;
+  else if (dir === 'bottom') target.scrollTop = target.scrollHeight;
+  else target.scrollTop += (dir === 'up' ? -0.85 : 0.85) * view;
+  return {moved: Math.round(target.scrollTop - before), y: target.scrollTop, h: target.scrollHeight, v: view};
+}
+"""
+
+# Finds the "next page" control of a result list and tags it for a real click.
+NEXT_PAGE_JS = r"""
+() => {
+  document.querySelectorAll('[data-qp-next]').forEach(e => e.removeAttribute('data-qp-next'));
+  const exact = /^(下一页|下页|后一页|下一頁|next|nextpage|›|»|>|>>|→)$/i;
+  const cands = [...document.querySelectorAll('a,button,[role=button],[onclick],input[type=button],input[type=submit],li,span,i')]
+    .filter(el => {
+      const t = (el.innerText || el.value || '').replace(/\s+/g, '');
+      const hint = (el.getAttribute('aria-label') || '') + (el.getAttribute('title') || '') + (el.className && el.className.baseVal === undefined ? el.className : '');
+      const hit = exact.test(t) || /下一页|next/i.test(hint) && t.length < 6;
+      if (!hit || !el.getClientRects().length) return false;
+      // Bare arrows (">") are often just separators: only count them when they look clickable.
+      if (!/[\u4e00-\u9fa5a-z]/i.test(t) && ['LI', 'SPAN', 'I'].includes(el.tagName) && !el.closest('a,button,[onclick]') &&
+          getComputedStyle(el).cursor !== 'pointer' && !/disabled/i.test(el.className || '')) return false;
+      return true;
+    });
+  const inner = cands.filter(el => !cands.some(o => o !== el && el.contains(o)));
+  const enabled = inner.filter(el => {
+    const c = el.closest('a,button,li,[onclick]') || el;
+    return !el.disabled && c.getAttribute('aria-disabled') !== 'true' && !/disabled/i.test((c.className || '') + (el.className || ''));
+  });
+  if (!enabled.length) return inner.length ? 'last' : 'none';
+  enabled[enabled.length - 1].setAttribute('data-qp-next', '1');
+  return 'ok';
+}
+"""
+
+
+def _plain(text: str) -> str:
+    """Rendered page text without the element markers (for the knowledge base)."""
+    text = re.sub(r"\[\d+(?:-\d+)?\]", "", text)
+    return re.sub(r"</?[a-z]+(?: [^<>]*)?>", " ", text)
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text.lower())
+
+
+def evidence_found(evidence: str, seen: str) -> bool:
+    """Does the quoted evidence really appear in the text that was read?
+
+    Tolerates the model stitching quotes together with …/，and small
+    wording slips in long quotes; a quote that isn't there at all fails.
+    """
+    corpus = _norm(seen)
+    frags = [f for f in (_norm(x) for x in re.split(r"…+|\.{2,}|[。；;，,\n]", evidence)) if len(f) >= 4]
+    if not frags:
+        return True
+    hits = 0
+    for f in frags:
+        if f in corpus:
+            hits += 1
+        elif len(f) > 16:
+            shingles = [f[i:i + 8] for i in range(0, len(f) - 7, 4)]
+            if sum(sh in corpus for sh in shingles) >= 0.6 * len(shingles):
+                hits += 1
+    return hits * 2 >= len(frags)
+
 
 ACTIONS = """每一步输出一个JSON对象：
 {"memory":"一两句话：已经确认了什么、下一步打算","actions":[动作1, 动作2, ...]}
@@ -84,11 +316,15 @@ actions 最多3个，按顺序执行；会改变页面的动作（goto/search/cl
 所以把"输入+点击检索"这类组合放在同一步里能省时间。可用动作：
 {"action":"goto","url":"https://..."}                 打开网址（优先用下面目录里的官方网站）
 {"action":"search","query":"...","engine":"bing"}     用搜索引擎搜索（engine 可选 bing / baidu）
-{"action":"click","ref":12}                          点击编号为12的元素（内嵌框架里的元素编号形如 "2-5"）
+{"action":"click","ref":12}                          点击页面文字里标成 [12]<a>…</a> 的元素（内嵌框架里的编号形如 "2-5"）
 {"action":"type","ref":5,"text":"...","enter":true}  在输入框5输入文字，enter=true 表示输入后按回车
 {"action":"select","ref":7,"option":"学位论文"}         在下拉框7中选择一个选项
+{"action":"click","text":"篇名"}                      按文字点击（菜单项等没有编号的地方）
+{"action":"hover","ref":12}                          鼠标移到元素上（打开要悬停才出现的菜单）
+{"action":"scroll","direction":"down"}               上下滑动页面：down/up 一屏，top/bottom 到顶/到底；加 "ref":12 滚到那个元素
+{"action":"next_page"}                               结果列表翻到下一页（自动找"下一页"按钮；也可以直接点页码）
 {"action":"find","text":"起草人|起草单位"}             在当前页面全文中查找关键词（多个关键词用 | 分隔）
-{"action":"read","from":5000}                        读取当前页面第5000字之后的内容（页面文字被截断时用）
+{"action":"read","from":5000}                        读取当前页面第5000字之后的内容（带元素编号，页面文字被截断时用）
 {"action":"pdf","url":"(可省略=当前页)","page":2,"find":"关键词"}  读取PDF：页数、指定页（负数从末尾算，-2=倒数第二页）、或查找关键词
 {"action":"back"}                                    返回上一页
 {"action":"look","question":"柱状图里排第一的作者是谁？"}  看当前页面截图回答问题（图表、只有图标没有文字的按钮、页面布局）；要点击图标时问它的位置
@@ -108,8 +344,12 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
    只能当线索，要到官方网站核实；只凭这类网站作答时 confidence 不要超过0.5。
 7. 答案常在页面后半部分（详情、表格、全文、名单）：页面文字被截断时先用 find 查题目关键词或用 read 读后面的内容，
    看全了再 answer，不要只看开头就下结论；每个选项都要在页面上找到依据。
-8. 页面还在加载时程序会多等一会；用户也可能暂停你、自己操作浏览器后让你继续，这时当前页面就是用户找到的页面，先仔细读它。
-9. answer 不能为空：单选一个字母，多选2-4个字母，判断题"对"或"错"。时间不够时也要给出最可能的答案，用 confidence（0-1，诚实）表示把握。
+8. 页面文字里 [编号]<a>文字</a> 标出了可以点的元素，就在它在页面上的位置，根据周围文字判断点哪个
+   （比如某条结果那一行后面的「下载」「详情」）；编号在同一页面上一直有效。点击后程序会告诉你页面有没有变化，
+   没变化说明没点对，换一个元素或方法；结果多时用 next_page 翻页，或先 find 关键词。
+9. 页面还在加载时程序会多等一会；用户也可能暂停你、自己操作浏览器后让你继续，这时当前页面就是用户找到的页面，先仔细读它。
+10. answer 的 evidence 要逐字抄页面原文，程序会核对原文是否真的在看过的页面里。
+11. answer 不能为空：单选一个字母，多选2-4个字母，判断题"对"或"错"。时间不够时也要给出最可能的答案，用 confidence（0-1，诚实）表示把握。
 {actions}
 
 网站目录（模块：网址）：
@@ -235,6 +475,10 @@ class Agent:
         self._flows: list = []
         self._saved: set[str] = set()
         self._prepared: set = set()
+        self._rendered = ""
+        self._window_end = 0
+        self._seen: list[str] = []
+        self._checked_evidence = False
         self._steps: list[Step] = []
         self._paused_for = 0.0
         self._previous = ""
@@ -272,8 +516,7 @@ class Agent:
             await self.page.wait_for_load_state("networkidle", timeout=2500)
         except Exception:
             busy = True  # still loading, or a page that polls forever
-        if busy:
-            await self._wait_for_content()
+        await self._wait_for_content(busy=busy)
         if await page_blocked(self.page):
             t0 = time.monotonic()
             await self.page.unroute("**/*")  # the CAPTCHA picture must load
@@ -283,22 +526,22 @@ class Agent:
             await self._prepare(self.page)
             self._paused_for += time.monotonic() - t0  # a person's time, not the research budget
 
-    async def _wait_for_content(self, limit: float = 15.0) -> None:
+    async def _wait_for_content(self, limit: float = 15.0, busy: bool = True) -> None:
         """Slow sites: the page is there but its results are still loading."""
-        probe = """() => { const t = document.body ? document.body.innerText : '';
-                     return [t.length, t.length < 1500 && /加载中|正在加载|数据加载|请稍候|loading/i.test(t)]; }"""
         deadline = time.monotonic() + limit
         last, same, noted = -1, 0, False
-        while time.monotonic() < deadline:
+        while True:
             try:
-                length, loading = await self.page.evaluate(probe)
+                length, loading = await asyncio.wait_for(self.page.evaluate(LOADING_JS), 5)
             except Exception:
                 return
-            if length >= 200 and not loading:
+            if not loading and (length >= 200 or not busy):
                 return
             same = same + 1 if length == last and not loading else 0
             if same >= 3 and length > 0:
                 return  # a short page that has stopped changing
+            if time.monotonic() >= deadline:
+                return
             last = length
             if not noted:
                 noted = True
@@ -327,41 +570,62 @@ class Agent:
                 frames.append(frame)
         return frames
 
+    async def _render(self, frame=None, prefix: str = "") -> dict:
+        target = frame or self.page
+        return await asyncio.wait_for(target.evaluate(RENDER_JS, {"prefix": prefix, "navCap": 15}), 20)
+
+    async def _render_all(self) -> str:
+        """Fresh text of the page and its frames, with element numbers (for find/read)."""
+        snap = await self._render()
+        self._rendered = snap["text"]
+        parts = [snap["text"]]
+        for i, frame in self._frames.items():
+            try:
+                fs = await self._render(frame, f"{i}-")
+            except Exception:
+                continue
+            parts.append(f"[内嵌框架{i}]\n{fs['text']}")
+        return "\n".join(parts)
+
     async def observe(self) -> str:
         page = self.page
         if self._is_pdf_url(page.url):
             return f"当前页是PDF：{page.url}\n用 pdf 动作读取。"
         try:
-            snap = await asyncio.wait_for(
-                page.evaluate(SNAPSHOT_JS, {"maxItems": self.max_items, "maxText": self.max_text, "prefix": ""}), 20)
+            snap = await self._render()
         except asyncio.TimeoutError:
             return f"页面还在加载，暂时读不到内容：{page.url}（可以换一个网站，或等一会再看）"
         except Exception as e:
             return f"读取页面失败：{e}"
+        text = self._rendered = snap["text"]
+        self._save(snap["url"], snap["title"], text)
+        # Start where the page is scrolled to (after a scroll, show what's on screen).
+        start = snap["vp"] if snap["vp"] > 300 else 0
+        if start:
+            cut = text.rfind("\n", max(0, start - 200), start)
+            start = cut + 1 if cut >= 0 else start
+        end = min(len(text), start + self.max_text)
+        sc = snap["scroll"]
+        screens = max(1, -(-sc["h"] // max(1, sc["v"])))
+        at = min(screens, int(sc["y"] // max(1, sc["v"])) + 1)
+        parts = [f"标题：{snap['title']}\n网址：{snap['url']}\n滚动位置：第{at}屏/共{screens}屏"]
+        note = f"页面文字（共{len(text)}字"
+        if start:
+            note += f"；从当前屏幕位置开始显示，上面还有{start}字，需要时用 read（from=0）"
+        note += f"；后面还有{len(text) - end}字，用 read（from={end}）继续读，或用 find 查关键词）：" if end < len(text) else "，已显示到末尾）："
+        parts.append(f"{note}\n{text[start:end]}")
+        self._window_end = end
         self._frames = {}
-        parts = [
-            f"标题：{snap['title']}\n网址：{snap['url']}\n可操作元素：\n" + "\n".join(snap["items"]),
-        ]
-        if snap.get("omitted"):
-            parts.append(f"（另有{snap['omitted']}个导航/页脚元素未列出）")
-        texts = [snap["text"]]
         for i, frame in enumerate(await self._content_frames(), start=1):
             try:
-                fs = await frame.evaluate(SNAPSHOT_JS, {"maxItems": 30, "maxText": 1200, "prefix": f"{i}-"})
+                fs = await self._render(frame, f"{i}-")
             except Exception:
                 continue
             self._frames[i] = frame
-            parts.append(f"\n内嵌框架{i}（{fs['url'][:80]}）的元素：\n" + "\n".join(fs["items"]))
-            texts.append(f"[内嵌框架{i}] {fs['text']}")
             self._save(fs["url"], fs["title"], fs["text"])
-        self._save(snap["url"], snap["title"], snap["text"])
-        body = "\n".join(texts)
-        if snap["textLength"] > self.max_text:
-            head = (f"\n页面文字（主页面共{snap['textLength']}字，这里只是前{self.max_text}字；"
-                    f"后面的内容用 read（from={self.max_text}）读取，或用 find 查关键词）：")
-        else:
-            head = f"\n页面文字（共{snap['textLength']}字，已全部列出）："
-        parts.append(f"{head}\n{body}")
+            ftext = fs["text"]
+            more = f"…（框架共{len(ftext)}字，用 find 查找）" if len(ftext) > 2000 else ""
+            parts.append(f"\n内嵌框架{i}（{fs['url'][:80]}）：\n{ftext[:2000]}{more}")
         return "\n".join(parts)
 
     def _save(self, url: str, title: str, text: str) -> None:
@@ -369,7 +633,7 @@ class Agent:
             return
         self._saved.add(url)
         try:
-            self.kb.add_document(url, [(None, text)], title=title, kind="live", module="live")
+            self.kb.add_document(url, [(None, _plain(text)[:60000])], title=title, kind="live", module="live")
         except Exception:
             pass
 
@@ -415,26 +679,57 @@ class Agent:
             await self._settle()
             return "已搜索"
         if kind == "click":
+            el = self._element(a.get("ref")) if a.get("ref") not in (None, "") else await self._by_text(str(a.get("text", "")))
+            href = await el.get_attribute("href", timeout=5000)
+            sig = await self._signature()
+            try:
+                await el.click(timeout=5000)
+            except Exception:
+                await el.evaluate("e => e.click()")  # covered by an overlay, or hidden styled input
+            await asyncio.sleep(0.6)
+            await self._follow_new_tab(before)
+            if href and self._is_pdf_url(urljoin(page.url, href)):
+                return await self.read_pdf({"url": urljoin(page.url, href)})
+            await self._settle()
+            return await self._changed(sig, "已点击")
+        if kind == "hover":
             el = self._element(a.get("ref"))
-            href = await el.get_attribute("href")
+            await el.hover(timeout=5000)
+            await asyncio.sleep(0.8)
+            return "已悬停"
+        if kind == "scroll":
+            return await self.scroll(a)
+        if kind == "next_page":
+            found = await page.evaluate(NEXT_PAGE_JS)
+            if found != "ok":
+                await page.evaluate(SCROLL_JS, "bottom")  # pagers are often at the bottom, loaded late
+                await asyncio.sleep(0.8)
+                found = await page.evaluate(NEXT_PAGE_JS)
+            if found == "last":
+                return "已经是最后一页了（下一页按钮不可用）"
+            if found != "ok":
+                return "没找到下一页按钮；看看页面上有没有页码链接可以点，或者用 scroll 往下滑"
+            sig = await self._signature()
+            el = page.locator("[data-qp-next]").last
             try:
                 await el.click(timeout=5000)
             except Exception:
                 await el.evaluate("e => e.click()")
             await asyncio.sleep(0.6)
             await self._follow_new_tab(before)
-            if href and self._is_pdf_url(urljoin(page.url, href)):
-                return await self.read_pdf({"url": urljoin(page.url, href)})
             await self._settle()
-            return "已点击"
+            await page.evaluate("() => window.scrollTo(0, 0)")
+            return await self._changed(sig, "已翻到下一页")
         if kind == "type":
             el = self._element(a.get("ref"))
             await el.fill(str(a.get("text", "")), timeout=5000)
             if a.get("enter"):
+                sig = await self._signature()
                 await el.press("Enter")
                 await asyncio.sleep(0.6)
                 await self._follow_new_tab(before)
                 await self._settle()
+                return await self._changed(sig, "已输入并回车")
             return "已输入"
         if kind == "select":
             el = self._element(a.get("ref"))
@@ -450,11 +745,12 @@ class Agent:
         if kind == "look":
             return await self.look(str(a.get("question", "描述这个页面")))
         if kind == "click_xy":
+            sig = await self._signature()
             await page.mouse.click(float(a.get("x", 0)), float(a.get("y", 0)))
             await asyncio.sleep(0.6)
             await self._follow_new_tab(before)
             await self._settle()
-            return "已按坐标点击"
+            return await self._changed(sig, "已按坐标点击")
         if kind == "find":
             return await self.find_text(str(a.get("text", "")))
         if kind == "read":
@@ -466,6 +762,66 @@ class Agent:
             await self._settle()
             return "已返回"
         return f"未知动作：{kind}"
+
+    async def _by_text(self, text: str):
+        """The smallest visible element showing exactly this text (else containing it)."""
+        text = text.strip()
+        if not text:
+            raise ValueError("click 需要 ref 或 text")
+        for exact in (True, False):
+            for frame in [self.page.main_frame, *self._frames.values()]:
+                loc = frame.get_by_text(text, exact=exact)
+                try:
+                    count = await loc.count()
+                except Exception:
+                    continue
+                for i in range(count - 1, -1, -1):  # innermost/last match first
+                    el = loc.nth(i)
+                    if await el.is_visible():
+                        return el
+        raise ValueError(f"页面上没有文字为“{text}”的可见元素")
+
+    async def _signature(self) -> str:
+        """What the page looks like now, to tell whether an action did anything."""
+        parts = [str(len(self.browser.context.pages)), self.page.url]
+        for frame in [self.page.main_frame, *self._frames.values()]:
+            try:
+                parts.append(await asyncio.wait_for(frame.evaluate(SIGNATURE_JS), 5))
+            except Exception:
+                parts.append("?")
+        return "#".join(parts)
+
+    async def _changed(self, before: str, done: str) -> str:
+        if await self._signature() != before:
+            return done
+        await asyncio.sleep(1.5)  # some sites update a moment later
+        if await self._signature() != before:
+            return done
+        return (f"{done}，但页面没有任何变化：可能点错了元素（比如点了文字而不是按钮/链接）、"
+                "要先填好或选中别的东西、或者内容在别的标签页；换一个元素或方法")
+
+    async def scroll(self, a: dict) -> str:
+        page = self.page
+        if a.get("ref") not in (None, ""):
+            el = self._element(a.get("ref"))
+            await el.scroll_into_view_if_needed(timeout=5000)
+            await page.evaluate("() => { window.__qpScrollBox = null; }")
+            await asyncio.sleep(0.5)
+            return "已滚动到该元素"
+        direction = str(a.get("direction", "down")).lower()
+        direction = direction if direction in ("up", "down", "top", "bottom") else "down"
+        info = await page.evaluate(SCROLL_JS, direction)
+        await asyncio.sleep(0.8)  # lazy-loaded lists fetch more when scrolled
+        try:
+            await page.wait_for_load_state("networkidle", timeout=2000)
+        except Exception:
+            pass
+        screens = max(1, -(-info["h"] // max(1, info["v"])))
+        at = min(screens, int(info["y"] // max(1, info["v"])) + 1)
+        if not info["moved"]:
+            edge = "顶部" if direction in ("up", "top") else "底部"
+            return f"已经在页面{edge}了，滚不动（第{at}屏/共{screens}屏）"
+        return f"已{'向上' if direction in ('up', 'top') else '向下'}滚动，现在在第{at}屏/共{screens}屏"
 
     async def _ask_image(self, image: bytes, question: str, extra: str = "") -> str:
         """One vision call; turns vision off for the session if unsupported."""
@@ -508,13 +864,10 @@ class Agent:
         return f"已运行流程「{name}」，参数 {json.dumps(params, ensure_ascii=False)}"
 
     async def _page_text(self) -> str:
-        text = ""
-        for frame in [self.page.main_frame, *self._frames.values()]:
-            try:
-                text += "\n" + await frame.evaluate("() => document.body ? document.body.innerText : ''")
-            except Exception:
-                continue
-        return re.sub(r"\n\s*\n+", "\n", text).strip()
+        try:
+            return await self._render_all()
+        except Exception:
+            return self._rendered
 
     async def find_text(self, needle: str) -> str:
         needles = [n.strip() for n in needle.split("|") if n.strip()]
@@ -533,11 +886,15 @@ class Agent:
         return "\n".join(out)
 
     async def read_more(self, start: object = None) -> str:
-        text = await self._page_text()
         try:
-            start = max(0, int(start)) if start is not None else self.max_text
+            await self._render_all()
+        except Exception:
+            pass
+        text = self._rendered
+        try:
+            start = max(0, int(start)) if start is not None else self._window_end
         except (TypeError, ValueError):
-            start = self.max_text
+            start = self._window_end
         if start >= len(text):
             return f"页面共{len(text)}字，已经读到末尾了"
         end = min(len(text), start + self.max_text)
@@ -674,6 +1031,21 @@ class Agent:
         except Exception:
             pass
 
+    def _remember(self, text: str) -> None:
+        """Everything read during research, for checking quoted evidence."""
+        if text:
+            self._seen.append(_plain(text))
+            while sum(len(t) for t in self._seen) > 800_000 and len(self._seen) > 1:
+                self._seen.pop(0)
+
+    def _evidence_ok(self, action: dict, steps: list[Step]) -> bool:
+        evidence = str(action.get("evidence") or "")
+        if not evidence:
+            return True
+        if any(s.action.get("action") == "look" or s.action.get("look") for s in steps):
+            return True  # read from a screenshot: can't be checked against text
+        return evidence_found(evidence, "\n".join(self._seen + [_plain(self._rendered)]))
+
     # --- buttons on the answering page ----------------------------------------------
 
     async def _interruptible(self, coro):
@@ -744,6 +1116,7 @@ class Agent:
         else:
             self._memory = ""
             self._previous = ""
+            self._seen = []
             self._load_recipes(q)
             if self._recipes:
                 self.log(f"  (found {len(self._recipes)} saved approach(es) for similar questions)")
@@ -754,6 +1127,7 @@ class Agent:
         final: dict | None = None
         failures = 0
         n = 0
+        self._checked_evidence = False
         try:
             while True:
                 if self.control is not None:
@@ -763,6 +1137,7 @@ class Agent:
                     if self.control.stop:
                         self.log("  ■ 停止查找，用已经看到的内容作答")
                 n += 1
+                self._remember(observation)
                 elapsed = time.monotonic() - start - self._paused_for
                 stopped = self.control is not None and self.control.stop
                 force = stopped or elapsed > budget - 6 or n >= max_steps
@@ -789,6 +1164,14 @@ class Agent:
                 for j, action in enumerate(acts):
                     kind = action.get("action")
                     if kind == "answer":
+                        if not self._checked_evidence and budget - elapsed > 15 and not self._evidence_ok(action, steps):
+                            # Once per question: a quote that isn't on any page read is checked again.
+                            self._checked_evidence = True
+                            self.log(f"  [{n}] (答案 {action.get('answer')} 的证据在看过的页面里找不到原文，再核实一下)")
+                            steps.append(Step({"action": "answer待核实", "answer": action.get("answer")},
+                                              "证据核对没通过：evidence 要逐字抄页面上的原文，而你给的在看过的页面里找不到。"
+                                              "用 find 在页面上找到原文（或 read 继续读、打开详情页）后再 answer；确实找不到就降低 confidence"))
+                            break
                         final = action
                         break
                     label = f"[{n}{'abc'[j] if len(acts) > 1 else ''}]"
@@ -808,6 +1191,7 @@ class Agent:
                         interrupted = True
                         break
                     steps.append(Step(action, result))
+                    self._remember(result)
                     last_kind = kind
                     if result.startswith("失败") or kind in PAGE_CHANGING or (kind == "type" and action.get("enter")):
                         break  # element numbers are stale now; look at the page again
@@ -843,6 +1227,9 @@ class Agent:
         if final.get("evidence"):
             reason += f"  证据：{str(final['evidence'])[:200]}"
         final_url = self.page.url if self.page is not None and not self.page.is_closed() else ""
+        if answer and final.get("evidence") and not self._evidence_ok(final, steps):
+            conf = min(conf, 0.6)
+            reason = "（给出的证据没在看过的页面原文中找到，可能不准）" + reason
         if answer and unreliable(final_url or last_url):
             conf = min(conf, 0.5)
             reason = "（依据来自题库/答案分享网站，可能不准，建议到官方网站核实）" + reason
@@ -853,7 +1240,7 @@ class Agent:
         return LiveResult(ans, steps, urls)
 
 
-PAGE_CHANGING = {"goto", "search", "click", "back", "flow"}
+PAGE_CHANGING = {"goto", "search", "click", "back", "flow", "scroll", "next_page", "hover", "click_xy"}
 
 # Question banks and answer-sharing sites: often wrong, never the only proof.
 UNRELIABLE_HOSTS = (

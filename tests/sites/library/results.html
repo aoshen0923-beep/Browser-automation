@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8"><title>文献检索结果</title>
+<style>
+  .pager span { cursor: pointer; margin: 0 4px; } .pager .disabled { color: #aaa; cursor: default; }
+  #fieldbox { cursor: pointer; display: inline-block; border: 1px solid #ccc; padding: 2px 6px; }
+  #notice { position: fixed; top: 30%; left: 30%; background: #fff; border: 1px solid #333; padding: 20px; }
+</style>
+<div class="menu" id="topmenu"></div>
+<div id="fieldbox">检索字段：<span id="field">主题</span>
+  <ul id="fl" style="display:none"><li>主题</li><li>篇名</li><li>作者</li></ul></div>
+<div id="list"></div>
+<div class="pager"><span id="prev">上一页</span><span data-p="1">1</span><span data-p="2">2</span><span data-p="3">3</span><span id="next">下一页</span></div>
+<button id="fav">收藏</button>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $("topmenu").innerHTML = Array.from({length: 30}, (_, i) => `<a href="c${i + 1}.html">栏目${i + 1}</a>`).join(" ");
+  const data = Array.from({length: 30}, (_, k) => {
+    const i = k + 1;
+    return i === 17 ? {id: i, title: "基于深度学习的儿童口罩佩戴检测研究", au: "王明; 李华"} : {id: i, title: `口罩相关研究第${i}篇`, au: `作者${i}`};
+  });
+  let page = 1;
+  function render() {
+    $("list").innerHTML = data.slice((page - 1) * 10, page * 10).map((d) =>
+      `<div class="item"><span class="t">${d.title}</span> <span class="au">${d.au}</span> ` +
+      `<a href="detail.html?id=${d.id}">详情</a> <a href="javascript:void(0)">下载</a></div>`).join("");
+    $("prev").className = page === 1 ? "disabled" : "";
+    $("next").className = page === 3 ? "disabled" : "";
+  }
+  function go(p) { $("list").innerHTML = "<div>正在加载…</div>"; setTimeout(() => { page = p; render(); }, 1200); }
+  $("next").addEventListener("click", () => { if (page < 3) go(page + 1); });
+  $("prev").addEventListener("click", () => { if (page > 1) go(page - 1); });
+  document.querySelectorAll(".pager span[data-p]").forEach((s) => s.addEventListener("click", () => go(+s.dataset.p)));
+  $("fav").addEventListener("click", () => {});
+  $("fieldbox").addEventListener("click", () => { $("fl").style.display = $("fl").style.display === "none" ? "block" : "none"; });
+  $("fl").querySelectorAll("li").forEach((li) => li.addEventListener("click", (e) => {
+    e.stopPropagation(); $("field").innerText = li.innerText; $("fl").style.display = "none"; }));
+  render();
+  // A cookie notice added last in the page, shown on top of everything.
+  document.body.insertAdjacentHTML("beforeend", '<div role="dialog" id="notice">本站使用Cookie改善体验 <button id="agree">同意</button></div>');
+  $("agree").addEventListener("click", () => $("notice").remove());
+</script>

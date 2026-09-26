@@ -251,9 +251,29 @@ quizpilot eval practice.txt --live --modules 11,12,24 --budget 60
 ```
 
 It prints the instant local answer first, so you have a fallback while the
-browser works. Each step the model may chain up to three actions (for
-example type the query and click 检索), reads search forms inside iframes,
-and lists content before navigation menus on busy pages. When it answers a
+browser works.
+
+How it reads and works a page:
+
+- The page is shown to the model as text in reading order with each
+  clickable element numbered in place (`GB/T 38880-2020 … [12]<a>详情</a>`),
+  so it clicks the link on the right result's line. Numbers stay the same
+  for the same element while it stays on the page.
+- Pop-up dialogs are shown first; long menus are moved to the end.
+- Script-driven widgets (custom dropdowns, tabs, pagers) count as
+  clickable too, and it can click by visible text.
+- It scrolls up and down (including scrollable panels inside a page, which
+  load more as you scroll), turns result pages with `next_page`, hovers
+  menus, and reads long pages chunk by chunk.
+- After every click it's told whether the page changed, so a wrong click
+  isn't mistaken for progress. After a page turn it waits for results that
+  are still showing 正在加载….
+- The evidence it quotes for an answer is checked against the pages it
+  actually read; a quote that isn't there is sent back once to verify, and
+  otherwise caps the confidence at 0.6.
+
+Each step the model may chain up to three actions (for example type the
+query and click 检索), and it reads search forms inside iframes. When it answers a
 question with confidence 0.7 or more, the steps are saved as a recipe in
 the knowledge base; similar questions later start from that recipe, and
 recipes travel to teammates with `kb --export` / `--merge`. Every page and PDF it reads is saved to the knowledge base,

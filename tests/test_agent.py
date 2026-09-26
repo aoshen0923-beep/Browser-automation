@@ -29,12 +29,12 @@ class ScriptedModel:
                     "evidence": "本标准主要起草人：高尚荣、李桂梅、李建全"}
         if "空白页" in user:
             return {"action": "goto", "url": SITE["url"] + "/index.html"}
-        m = re.search(r"\[(\d+)\] a -> std\.pdf", user)
+        m = re.search(r"\[(\d+)\]<a href=std\.pdf", user)
         if m:
             return {"action": "click", "ref": int(m.group(1))}
         if "共2页" in user:
             return {"action": "pdf", "page": 2}
-        m = re.search(r"\[(\d+)\] input type=text", user)
+        m = re.search(r"\[(\d+)\]<input type=text", user)
         if m and "已输入" not in user:
             return {"action": "type", "ref": int(m.group(1)), "text": "GB/T 38880", "enter": True}
         return {"action": "find", "text": "起草人"}
@@ -248,11 +248,11 @@ def test_batched_actions_in_an_iframe_and_recipes(std_site, chrome):  # noqa: F8
                                                                "evidence": "本标准主要起草人：高尚荣、李桂梅、李建全"}]}
             if "共2页" in user:
                 return {"actions": [{"action": "pdf", "page": 2}]}
-            m = re.search(r"\[(\d+)\] a -> std\.pdf", user)
+            m = re.search(r"\[(\d+)\]<a href=std\.pdf", user)
             if m:
                 return {"actions": [{"action": "click", "ref": int(m.group(1))}]}
-            m = re.search(r"\[(1-\d+)\] input type=text", user)
-            b = re.search(r"\[(1-\d+)\] button", user)
+            m = re.search(r"\[(1-\d+)\]<input type=text", user)
+            b = re.search(r"\[(1-\d+)\]<button", user)
             if m and b:
                 return {"memory": "在框架里的表单检索", "actions": [
                     {"action": "type", "ref": m.group(1), "text": "GB/T 38880"},
@@ -288,8 +288,8 @@ def test_content_links_survive_busy_navigation(std_site, chrome):  # noqa: F811
         def chat_json(self, system, user, max_tokens=700):
             if "空白页" in user:
                 return {"action": "goto", "url": std_site + "/busy.html"}
-            assert "a -> std.pdf" in user, "content link was cut off by navigation links"
-            assert "导航/页脚元素未列出" in user
+            assert "<a href=std.pdf>" in user, "content link was cut off by navigation links"
+            assert "菜单/导航链接" in user
             return {"action": "answer", "answer": "C", "confidence": 0.5}
 
     async def run():
