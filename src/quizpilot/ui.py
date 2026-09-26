@@ -23,7 +23,7 @@ from . import __version__
 from .question import Question, parse_question
 from .solver import ROUNDS, Answer, break_even, solve, worth_answering
 
-LIVE_BUDGET = {"individual": 30, "team": 120}
+LIVE_BUDGET = {"individual": 30, "team": 150}
 
 
 async def page_blocked_safe(page) -> bool:

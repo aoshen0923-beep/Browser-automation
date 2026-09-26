@@ -590,3 +590,25 @@ def test_option_checklist_drives_multi_choice(std_site, chrome):  # noqa: F811
     # Answered with options still unverified: confidence is held down and says why.
     assert result.answer.answer == "ABC" and result.answer.confidence == 0.7
     assert "选项 C、D 还没核实" in result.answer.reason
+
+
+def test_a_refused_open_many_becomes_a_proper_look(std_site, chrome):  # noqa: F811
+    class Stubborn:
+        def chat_json(self, system, user, max_tokens=700):
+            if "时间到了" in user:
+                return {"action": "answer", "answer": "C", "confidence": 0.5}
+            return {"action": "open_many", "urls": [std_site + "/results.html", std_site + "/index.html"], "find": "GB"}
+
+    logs = []
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, Stubborn(), [], None, log=logs.append)
+            return await agent.run(parse_question(QUESTION, "single"), budget=60, max_steps=4, close=True)
+
+    result = asyncio.run(run())
+    kinds = [s.action["action"] for s in result.steps]
+    # The same open_many again isn't skipped: it opens the first page to work on it instead.
+    assert kinds[:3] == ["open_many", "goto", "goto"], kinds
+    assert result.steps[1].action["url"].endswith("/results.html") and result.steps[2].action["url"].endswith("/index.html")
+    assert any("改为打开页面细看" in line for line in logs)

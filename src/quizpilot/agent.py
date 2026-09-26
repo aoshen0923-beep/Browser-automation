@@ -316,9 +316,11 @@ SITE_TIPS = {
     "dl.acm.org": "检索直接用 https://dl.acm.org/action/doSearch?AllField=论文标题 ；结果和文章页上的 OPEN ACCESS"
                   " 标记（可能显示为 [图标:…]）表示OA；文章页的 Pages 1 - N 就是页数；全文PDF是"
                   " https://dl.acm.org/doi/pdf/DOI ，用 pdf 动作读（page=2 可看第2页的图注）；要核对几篇论文时用 open_many 同时检索每个标题",
-    "cell.com": "Cell官网：首页右上角 Search 是 Quick Search（可选检索字段），旁边有 Advanced Search（有 Access Filter 等筛选项，"
-                "要点开看有几个选项）；过刊在 https://www.cell.com/cell/archive 按年份/卷/期浏览，每期目录按文献类型分组"
-                "（Articles 等），数篇数要打开那一期逐组数；文章页写着页码范围（如 p1777–1792.e21）和 PDF 链接",
+    "cell.com": "Cell官网（有 Cloudflare 验证，打开慢一点）：页面顶部的 Search 是 Quick Search——点开它看有没有检索字段下拉框、"
+                "有哪些字段；高级检索要从 Search 面板里点 Advanced Search 链接进入（不要自己拼网址，猜的网址是错误页），"
+                "里面的 Access Filter 等筛选项要点开数选项；过刊在 https://www.cell.com/cell/archive 按年份/卷/期浏览，每期目录按文献类型分组"
+                "（Articles 等），数篇数要打开那一期逐组数；文章页写着页码范围和 PDF 链接：p1777–1792.e21 的意思是正文 1777 到 1792 共16页，"
+                "再加补充页 e1 到 e21 共21页，PDF 全文一共约37页；PDF 要登录才能下载，页数按页码范围算",
     "science.org": "检索直接用 https://www.science.org/action/doSearch?AllField=关键词 ；过刊目录 https://www.science.org/loi/science ，"
                    "某卷某期 https://www.science.org/toc/science/卷/期 ；文章页有 PDF 链接",
     "sciencedirect.com": "检索直接用 https://www.sciencedirect.com/search?qs=关键词 ；Open access 文章有标记；期刊页可按卷期浏览",
@@ -460,7 +462,9 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
 5. 页面需要登录或出现验证码时，程序会暂停等用户处理，你继续即可。
 6. 题库、答案分享、问答类网站（如 itihey、百度知道、百度文库、作业帮、道客巴巴）上的答案经常是错的，
    只能当线索，要到官方网站核实；只凭这类网站作答时 confidence 不要超过0.5。
-7. 多选题四个选项都要各自找到依据，options 里还有"待查"就继续查，全部核实完再 answer（时间到了除外）；
+7. 不要猜网站内部的网址（比如高级检索页、某期目录页），猜错就是错误页：从页面上点链接/按钮进入，
+   除非下面的网站用法里给了网址。
+   多选题四个选项都要各自找到依据，options 里还有"待查"就继续查，全部核实完再 answer（时间到了除外）；
    判断题/单选题也要找到原文。常见题型：论文页数看文章页的 Pages 或 pdf 的"共N页"；"第N页有几张图/表"用 pdf page=N 看图注个数，
    没把握再加 look 看那一页；判断是否 OA 看检索结果/文章页的 Open Access 标记，多个选项要逐个核对，别凭印象。
    浏览器里打开的 PDF 你翻不了页，一律用 pdf 动作读。
@@ -1137,17 +1141,25 @@ class Agent:
             ctype = (resp.headers.get("content-type", "") if resp else "").lower()
             if "pdf" in ctype or self._is_pdf_url(page.url):
                 return f"{head}\n" + await self.read_pdf({"url": page.url, "find": words[0] if words else ""})
+            checked = False
+            for _ in range(15):  # most "Just a moment..." checks pass by themselves within seconds
+                if not await page_blocked(page):
+                    break
+                checked = True
+                await asyncio.sleep(1)
             try:
-                await page.wait_for_load_state("networkidle", timeout=3000)
+                await page.wait_for_load_state("networkidle", timeout=5000 if checked else 3000)
             except Exception:
                 pass
+            last = -1
             for _ in range(12):  # results that arrive after the page itself
                 try:
                     length, loading = await page.evaluate(LOADING_JS)
                 except Exception:
                     break
-                if length >= 200 and not loading:
-                    break
+                if not loading and (length >= 200 or length == last):
+                    break  # has content, or a short page that has stopped changing
+                last = length
                 await asyncio.sleep(0.8)
             if await page_blocked(page):
                 self._note_site(url, "captcha", "出现过人机验证，别连续快速打开很多页面")
@@ -1201,10 +1213,10 @@ class Agent:
             data = await resp.body()
         except Exception:
             pass
-        if not data.lstrip()[:5].startswith(b"%PDF"):
+        if not pdftools.is_pdf(data):
             # Blocked (Cloudflare etc.) or needs the login session: fetch from inside the site's own page.
             data = await self._fetch_in_page(url) or data
-        if data.lstrip()[:5].startswith(b"%PDF"):
+        if pdftools.is_pdf(data):
             self._pdf_cache[url] = data
         return data
 
@@ -1214,8 +1226,10 @@ class Agent:
         try:
             doc = pdftools.open_pdf(data)
         except Exception:
-            return (f"{url} 没能下载到PDF（可能被网站拦截或要登录）。可以打开论文页面点「PDF」按钮，"
-                    "在PDF页面上再用 pdf 动作；或者看文章页面上写的页数等信息")
+            head = re.sub(r"<[^>]+>|\s+", " ", data[:3000].decode("utf-8", "replace"))[:150]
+            return (f"{url} 拿到的不是PDF（内容开头：{head.strip()}），多半是登录页/验证页，这篇要登录或权限。"
+                    "不要拿它当页数依据；页数可以看文章页的页码范围（如 p1777–1792.e21），"
+                    "或者打开论文页面点「PDF」按钮后在PDF页面上用 pdf 动作")
         with doc:
             total = doc.page_count
             texts = pdftools.page_texts(doc)
@@ -1304,7 +1318,7 @@ class Agent:
         if force:
             parts.append("\n时间到了：现在必须输出 answer 动作，给出最可能的答案。")
         else:
-            parts.append(f"\n剩余时间约{remaining:.0f}秒。输出下一步的JSON。")
+            parts.append(f"\n剩余时间约{remaining:.0f}秒（每一步大约5-10秒，时间够就继续查证，不要凭常识或印象判断选项）。输出下一步的JSON。")
         return "\n".join(parts)
 
     async def _decide(self, q: Question, steps: list[Step], observation: str, remaining: float, force: bool) -> list[dict]:
@@ -1537,6 +1551,15 @@ class Agent:
                         break
                     label = f"[{n}{'abc'[j] if len(acts) > 1 else ''}]"
                     repeat = _repeats(action, steps)
+                    if repeat and kind == "open_many":
+                        # Don't waste the step: look properly at the first page it wanted.
+                        visited = {str(s.action.get("url", "")).rstrip("/") for s in steps if s.action.get("action") == "goto"}
+                        fresh = [u for u in action.get("urls") or [] if str(u).rstrip("/") not in visited]
+                        if fresh:
+                            self.log(f"  {label} (open_many 用够了，改为打开页面细看)")
+                            action = {"action": "goto", "url": fresh[0]}
+                            kind = "goto"
+                            repeat = _repeats(action, steps)
                     if repeat:
                         self.log(f"  {label} (skipped repeat) {_describe(action)}")
                         steps.append(Step(action, f"重复操作，已跳过：{repeat}。换一个方法，比如打开目录中的官方网站、换关键词，或根据已有信息直接 answer。"))

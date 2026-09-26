@@ -146,3 +146,9 @@ def test_goto_survives_sites_that_abort_their_first_navigation(site, chrome):
                 await goto(page, f"http://127.0.0.1:{_free_port()}/", 10000)
 
     asyncio.run(run())
+
+
+def test_cloudflare_interstitial_is_a_challenge():
+    assert looks_like_challenge("Just a moment...\nwww.cell.com\nVerifying you are human. This may take a few seconds.", [])
+    assert looks_like_challenge("", ["https://challenges.cloudflare.com/cdn-cgi/challenge-platform/x"])
+    assert not looks_like_challenge("Just a moment, " + "a long article about waiting " * 40, [])

@@ -194,6 +194,14 @@ def gated(chrome):  # noqa: F811
             pass
 
         def do_GET(self):
+            if self.path.startswith("/members.pdf"):  # needs a login: always answers with the login page
+                body = ("<html><body>Login to your account Email/Username Password " + "x" * 3000 + "</body></html>").encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path.endswith(".pdf") and not self.headers.get("Sec-Fetch-Mode"):
                 body = b"<html>Just a moment...</html>"  # the API request is challenged
                 self.send_response(403)
@@ -223,6 +231,9 @@ def test_oa_icons_blocked_pdfs_and_figure_captions(gated, chrome):  # noqa: F811
             # The API download is challenged; reading from inside the page works.
             out = await agent.act({"action": "pdf", "url": gated + "/gated.pdf", "page": 2})
             assert "共2页" in out and "图注 2 个（Figure 1、Figure 2）" in out and "表注 1 个（Table 1）" in out, out
+            # A login page served at a PDF address is reported as such, never as a "10-page PDF".
+            out = await agent.act({"action": "pdf", "url": gated + "/members.pdf"})
+            assert "拿到的不是PDF" in out and "Login to your account" in out and "共" not in out.split("（")[0], out
             # A download link hands over the file, which is read at once.
             agent._pdf_cache.clear()
             obs = await agent.observe()

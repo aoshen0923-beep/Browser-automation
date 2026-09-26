@@ -51,3 +51,15 @@ def test_html_to_text():
     title, text = html_to_text("<title>Hi</title><style>a{}</style><div>one</div><div>two</div>")
     assert title == "Hi"
     assert text == "one\ntwo"
+
+
+def test_a_login_page_is_never_read_as_a_pdf():
+    import pytest
+
+    from quizpilot import pdftools
+
+    html = b"<!DOCTYPE html><html><body>Login to your account Email/Username Password " + b"x" * 5000 + b"</body></html>"
+    with pytest.raises(pdftools.NotAPdf):
+        pdftools.open_pdf(html)
+    assert not pdftools.is_pdf(html)
+    assert pdftools.is_pdf(b"\n%PDF-1.7\n...")

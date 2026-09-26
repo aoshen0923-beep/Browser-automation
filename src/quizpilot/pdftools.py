@@ -80,8 +80,20 @@ def page_info(page: pymupdf.Page) -> PageInfo:
     )
 
 
+class NotAPdf(ValueError):
+    """The bytes are something else, typically a login or verification page."""
+
+
+def is_pdf(data: bytes) -> bool:
+    # The header may follow a little junk, but must come within the first 1 KB.
+    return b"%PDF-" in data[:1024]
+
+
 def open_pdf(path: Path | str | bytes) -> pymupdf.Document:
     if isinstance(path, bytes):
+        if not is_pdf(path):
+            # MuPDF would happily lay out an HTML login page as a "PDF" of several pages.
+            raise NotAPdf("not a PDF")
         return pymupdf.open(stream=path, filetype="pdf")
     return pymupdf.open(str(path))
 

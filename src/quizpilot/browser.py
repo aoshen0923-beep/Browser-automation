@@ -34,6 +34,9 @@ _CHALLENGE_WORDS = (
     "验证码", "安全验证", "人机验证", "滑动验证", "拖动滑块", "向右滑动", "请完成验证", "请按住滑块",
     "拖动下方拼图", "点击完成验证", "请依次点击", "请输入图中", "访问验证", "异常访问", "访问过于频繁",
     "安全检查", "captcha", "verify you are human", "are you a robot",
+    # Cloudflare / Akamai interstitials ("Just a moment..." usually clears itself in a few seconds)
+    "just a moment", "checking your browser", "verifying you are human", "needs to review the security",
+    "正在验证您是否是真人", "请稍候…", "请稍候...", "enable javascript and cookies to continue",
 )
 
 
@@ -91,7 +94,8 @@ async def goto(page: Page, url: str, timeout_ms: int = 30000):
 
 async def page_blocked(page: Page) -> bool:
     try:
-        text = await page.evaluate("() => (document.body && document.body.innerText || '').slice(0, 4000)")
+        text = await page.evaluate(
+            "() => document.title + '\\n' + (document.body && document.body.innerText || '').slice(0, 4000)")
     except Exception:
         return False
     return looks_like_challenge(text, [f.url for f in page.frames])

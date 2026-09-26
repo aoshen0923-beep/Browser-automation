@@ -263,7 +263,7 @@ options, finds text on long pages and reads PDFs page by page. You can
 watch it work in the browser window.
 
 ```powershell
-quizpilot ask --live --round team            # up to 120 s per question
+quizpilot ask --live --round team            # up to 150 s per question
 quizpilot ask --live --budget 40             # custom time limit
 quizpilot eval practice.txt --live --modules 11,12,24 --budget 60
 ```

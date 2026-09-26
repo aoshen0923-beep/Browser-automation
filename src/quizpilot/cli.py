@@ -273,7 +273,7 @@ def _model(cfg: Config):
     return OpenAICompatible(cfg.llm)
 
 
-LIVE_BUDGET = {"individual": 30, "team": 120}
+LIVE_BUDGET = {"individual": 30, "team": 150}
 
 
 def _budget(args) -> float:
@@ -545,7 +545,7 @@ def build_parser() -> argparse.ArgumentParser:
         s = sub.add_parser(name, help=help_)
         s.add_argument("--round", choices=["individual", "team"], default="individual")
         s.add_argument("--live", action="store_true", help="also research live in your Chrome (start it with `quizpilot chrome`)")
-        s.add_argument("--budget", type=float, help="seconds per question for --live (default 30 individual, 120 team)")
+        s.add_argument("--budget", type=float, help="seconds per question for --live (default 30 individual, 150 team)")
         if name == "ask":
             s.add_argument("question", nargs="*", help="question text (omit for interactive mode)")
             s.add_argument("--kind", choices=["single", "multi", "judge"], help="override the detected type")
