@@ -661,6 +661,7 @@ class Agent:
         self.trace: list[dict] = []  # everything the model saw and did, for the run record
         self._window_end = 0
         self._seen: list[str] = []
+        self._seen_norm: list[str] = []  # the same, normalised once (checked every step)
         self._checked_evidence = False
         self._steps: list[Step] = []
         self._paused_for = 0.0
@@ -834,10 +835,18 @@ class Agent:
         if self.kb is None or not text.strip() or url in self._saved or url.startswith(("about:", "chrome")):
             return
         self._saved.add(url)
+
+        def store() -> None:
+            try:
+                self.kb.add_document(url, [(None, _plain(text)[:60000])], title=title, kind="live", module="live")
+            except Exception:
+                pass
+
+        # Indexing a long page takes a moment: do it off the event loop so nothing waits on it.
         try:
-            self.kb.add_document(url, [(None, _plain(text)[:60000])], title=title, kind="live", module="live")
-        except Exception:
-            pass
+            asyncio.get_running_loop().run_in_executor(None, store)
+        except RuntimeError:
+            store()
 
     @staticmethod
     def _is_pdf_url(url: str) -> bool:
@@ -1181,7 +1190,13 @@ class Agent:
             return "open_many 需要 urls（网址列表）"
         words = [w.strip() for w in str(a.get("find", "")).split("|") if w.strip()]
         self._kept = None
-        results = await asyncio.gather(*(self._peek(i, url, words) for i, url in enumerate(urls, 1)))
+        gate = asyncio.Semaphore(3)  # at most three heavy pages loading at once
+
+        async def peek(i: int, url: str) -> str:
+            async with gate:
+                return await self._peek(i, url, words)
+
+        results = await asyncio.gather(*(peek(i, url) for i, url in enumerate(urls, 1)))
         kept, self._kept = self._kept, None
         if kept is not None:
             # Stay on the first page read, so the next step can click and scroll there.
@@ -1299,10 +1314,11 @@ class Agent:
                     "或者打开论文页面点「PDF」按钮后在PDF页面上用 pdf 动作")
         with doc:
             total = doc.page_count
-            texts = pdftools.page_texts(doc)
+            # Extracting and indexing hundreds of pages is slow: keep it off the event loop.
+            texts = await asyncio.to_thread(pdftools.page_texts, doc)
             if self.kb is not None and url not in self._saved:
                 self._saved.add(url)
-                self.kb.add_document(url, texts, title=url.rsplit("/", 1)[-1], kind="pdf", module="live")
+                await asyncio.to_thread(self.kb.add_document, url, texts, title=url.rsplit("/", 1)[-1], kind="pdf", module="live")
             out = [f"PDF {url}：共{total}页"]
             needle = str(a.get("find") or "")
             if needle:
@@ -1435,7 +1451,7 @@ class Agent:
         """Checklist marks that what was actually read doesn't support."""
         if q.kind == JUDGE or not self._checks:
             return []
-        corpus = _norm("\n".join(self._seen + [_plain(self._rendered)]))
+        corpus = "".join(self._seen_norm) + _norm(_plain(self._rendered))
         out = []
         for k, status in sorted(self._checks.items()):
             text = q.options.get(k, "")
@@ -1497,8 +1513,10 @@ class Agent:
         """Everything read during research, for checking quoted evidence."""
         if text:
             self._seen.append(_plain(text))
+            self._seen_norm.append(_norm(self._seen[-1]))
             while sum(len(t) for t in self._seen) > 800_000 and len(self._seen) > 1:
                 self._seen.pop(0)
+                self._seen_norm.pop(0)
 
     def _evidence_ok(self, action: dict, steps: list[Step]) -> bool:
         evidence = str(action.get("evidence") or "")
@@ -1579,6 +1597,7 @@ class Agent:
             self._memory = ""
             self._previous = ""
             self._seen = []
+            self._seen_norm = []
             self._checks = {}
             self._load_recipes(q)
             if self._recipes:

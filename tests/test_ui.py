@@ -309,3 +309,45 @@ def test_research_starts_without_waiting_for_the_quick_answer_and_old_tabs_close
         assert call(f"{base}/api/jobs/{job['id']}")["can_continue"] is True
         app.loop.call_soon_threadsafe(app.loop.stop)
         t.join(10)
+
+
+def test_answering_page_stays_light_after_many_questions(std_site, chrome, tmp_path):  # noqa: F811
+    from playwright.sync_api import sync_playwright
+
+    from test_browser import _chromium
+
+    cfg = Config(root=tmp_path)
+    cfg.browser.cdp_url = chrome
+    with KB(":memory:") as kb:
+        app = App(cfg, kb, Model(), [], live_available=False)
+        t = threading.Thread(target=app.serve, kwargs={"port": 0, "open_browser": False}, daemon=True)
+        t.start()
+        while not app.url:
+            time.sleep(0.1)
+        base = app.url.rstrip("/")
+        for i in range(45):
+            call(base + "/api/ask", {"question": QUESTION + f" {i}", "round": "team", "live": False})
+        while any(j.status != "done" for j in app.jobs.values()):
+            time.sleep(0.1)
+        with sync_playwright() as p:
+            viewer = p.chromium.launch(executable_path=_chromium(), args=["--no-sandbox"])
+            page = viewer.new_page()
+            page.goto(app.url)
+            page.wait_for_function("document.querySelectorAll('.job .big').length >= 40", timeout=15000)
+            assert page.locator(".job").count() == 40  # older cards leave the page
+            assert page.locator(".job").first.get_attribute("data-id") == "45"
+            # A finished card is not redrawn by the polling (its nodes stay the same).
+            page.evaluate("window.__node = document.querySelector('.job .big')")
+            page.wait_for_timeout(2500)
+            assert page.evaluate("window.__node.isConnected")
+            # Messages use a bar, never a blocking alert().
+            dialogs = []
+            page.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
+            page.evaluate("toast('测试消息')")
+            assert page.locator("#toast").inner_text() == "测试消息" and not dialogs
+            page.fill("#q", "")
+            page.click("#go")  # empty question: nothing sent, no dialog
+            assert not dialogs
+            viewer.close()
+        app.loop.call_soon_threadsafe(app.loop.stop)
+        t.join(10)

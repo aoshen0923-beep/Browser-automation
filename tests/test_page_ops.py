@@ -340,12 +340,13 @@ def test_no_blind_retries_and_checklist_marks_are_checked():
 
     q = parse_question("在《cell》官网的高级检索中，可选的检索字段包括（ ）。\nA. Article Title\nB. Authors\nC. DOI\nD. Affiliation", "multi")
     agent = Agent(None, None, [], None, log=lambda *_: None)
-    agent._seen = ["Search within: All Fields | Article Title | Authors | Keywords"]
+    agent._remember("Search within: All Fields | Article Title | Authors | Keywords")
     agent._checks = {"A": "对：下拉里有", "B": "对：下拉里有", "C": "对：同一字段下拉列表", "D": "错：没看到"}
     notes = dict(agent._suspicious(q))
     assert set(notes) == {"C"} and "DOI" in notes["C"]  # C was marked right without ever seeing "DOI"
     assert agent._unchecked(q) == ["C"]
     tf = parse_question("Article Type 筛选项下的选项包括（）\nA. Article\nB. Review Article\nC. Book Review\nD. Editorial", "multi")
-    agent._seen = ["Article Type: Research Article (2893849) / Review Article (95345) / Book Review / Editorial"]
+    agent._seen, agent._seen_norm = [], []
+    agent._remember("Article Type: Research Article (2893849) / Review Article (95345) / Book Review / Editorial")
     agent._checks = {"A": "错：没有独立的Article", "B": "对", "C": "对", "D": "对"}
     assert "出现过" in dict(agent._suspicious(tf))["A"]  # 'Article' does appear (as Research Article)

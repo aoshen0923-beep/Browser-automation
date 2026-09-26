@@ -220,6 +220,24 @@ header { flex-wrap: wrap; }
 
 <script>
 const $ = (id) => document.getElementById(id);
+// A message bar instead of alert(): alert() freezes the whole page until someone clicks OK.
+function toast(msg) {
+  let bar = document.getElementById("toast");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "toast";
+    bar.style.cssText = "position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:99;max-width:min(680px,92vw);" +
+      "background:var(--panel);color:var(--text);border:1px solid var(--line);border-left:4px solid var(--accent);" +
+      "border-radius:8px;padding:10px 14px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:14px;cursor:pointer";
+    bar.title = "点击关闭";
+    bar.addEventListener("click", () => { bar.hidden = true; });
+    document.body.appendChild(bar);
+  }
+  bar.textContent = msg;
+  bar.hidden = false;
+  clearTimeout(bar._t);
+  bar._t = setTimeout(() => { bar.hidden = true; }, 8000);
+}
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 let status = null;
 const cards = new Map();   // job id -> element
@@ -250,7 +268,7 @@ async function init() {
     $("status").textContent = "连接不上 quizpilot，请确认黑色窗口还开着";
   }
   const jobs = await (await fetch("/api/jobs")).json().catch(() => []);
-  for (const j of jobs.reverse()) track(j.id);
+  for (const j of jobs.slice(0, MAX_CARDS).reverse()) track(j.id);  // newest first from the server
 }
 
 $("round").addEventListener("change", () => {
@@ -273,7 +291,7 @@ async function submit(text) {
     $("q").value = "";
     track(data.id);
   } catch (e) {
-    alert("提交失败：" + e.message);
+    toast("提交失败：" + e.message);
   } finally {
     $("go").disabled = false;
     $("q").focus();
@@ -288,12 +306,17 @@ $("paste").addEventListener("click", async () => {
     submit(text);
   } catch (e) {
     $("q").focus();
-    alert("浏览器不允许读取剪贴板，请在输入框里按 Ctrl+V 粘贴。");
+    toast("浏览器不允许读取剪贴板，请在输入框里按 Ctrl+V 粘贴。");
   }
 });
 
+const MAX_CARDS = 40;  // older finished questions leave the page (they stay in the run records)
 function track(id) {
   if (cards.has(id)) return;
+  if (cards.size >= MAX_CARDS) {
+    const old = [...cards.keys()].filter((k) => !running.has(k)).sort((a, b) => a - b);
+    for (const k of old.slice(0, cards.size - MAX_CARDS + 1)) { cards.get(k).remove(); cards.delete(k); }
+  }
   const el = document.createElement("div");
   el.className = "panel job";
   el.dataset.id = id;
@@ -321,14 +344,30 @@ function answerBlock(a, title, round) {
     ${links ? `<div style="margin-top:6px">${links}</div>` : ""}</div>`;
 }
 
+const inflight = new Set();   // job ids with a request on the way: never pile up requests
 async function refresh(id) {
+  if (inflight.has(id)) return;
+  inflight.add(id);
   let j;
-  try { j = await (await fetch(`/api/jobs/${id}`)).json(); } catch (e) { return; }
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 10000);
+    try { j = await (await fetch(`/api/jobs/${id}`, {signal: ctl.signal})).json(); } finally { clearTimeout(timer); }
+  } catch (e) { return; } finally { inflight.delete(id); }
   const el = cards.get(id);
+  if (!el) { running.delete(id); return; }
+  // Only redraw the card when something besides the clock changed.
+  const key = JSON.stringify({...j, elapsed: 0});
+  if (el._key === key) {
+    const clock = el.querySelector(".elapsed");
+    if (clock) clock.textContent = j.elapsed;
+    return;
+  }
+  el._key = key;
   const kind = {single: "单选", multi: "多选", judge: "判断"}[j.kind] || j.kind;
   const head = j.status === "running"
-    ? `<span class="spinner"></span> ${esc(j.phase)} · ${j.elapsed}s`
-    : `完成 · 用时 ${j.elapsed}s`;
+    ? `<span class="spinner"></span> ${esc(j.phase)} · <span class="elapsed">${j.elapsed}</span>s`
+    : `完成 · 用时 <span class="elapsed">${j.elapsed}</span>s`;
   // Show a banner while the agent waits for a CAPTCHA to be solved in Chrome.
   const lastWait = j.log.findLastIndex((l) => l.includes("需要人机验证"));
   const lastEnd = j.log.findLastIndex((l) => l.includes("验证已通过") || l.includes("等待验证超时") || l.includes("已暂停") || l.includes("继续："));
@@ -346,7 +385,8 @@ async function refresh(id) {
     ${j.error ? `<div class="err" style="margin-top:6px">${esc(j.error)}</div>` : ""}
     ${answerBlock(j.final, "上网查找后的答案", j.round)}
     ${answerBlock(j.quick, j.final ? "本地快速答案" : "本地快速答案（上网查找进行中或未开启）", j.round)}
-    ${j.log.length ? `<div class="section"><h3>浏览器操作步骤</h3><pre class="log">${esc(j.log.join("\n"))}</pre></div>` : ""}`;
+    ${j.log.length ? `<div class="section"><h3>浏览器操作步骤</h3><pre class="log">${
+      j.log.length > 150 ? `（前面还有 ${j.log.length - 150} 行，完整记录在「导出运行记录」里）\n` : ""}${esc(j.log.slice(-150).join("\n"))}</pre></div>` : ""}`;
   const log = el.querySelector(".log");
   if (log) log.scrollTop = log.scrollHeight;
   // The buttons are only redrawn when they change, so a click is never lost to a refresh.
@@ -392,7 +432,7 @@ $("jobs").addEventListener("click", async (e) => {
     running.add(id);
     refresh(id);
   } catch (err) {
-    alert("操作失败：" + err.message);
+    toast("操作失败：" + err.message);
     b.disabled = false;
   }
 });
@@ -459,7 +499,7 @@ $("sites").addEventListener("click", async (e) => {
       await loadSites();
     }
   } catch (err) {
-    alert("操作失败：" + err.message);
+    toast("操作失败：" + err.message);
     b.disabled = false;
   }
 });
@@ -473,16 +513,16 @@ $("add-site").addEventListener("click", async () => {
     $("add-name").value = ""; $("add-url").value = "";
     $("site-filter").value = "";
     await loadSites();
-  } catch (err) { alert("添加失败：" + err.message); }
+  } catch (err) { toast("添加失败：" + err.message); }
 });
 $("import-file").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   try {
     const r = await api("/api/logins/import", {html: await file.text()});
-    alert(`导入了 ${r.added} 个新网站`);
+    toast(`导入了 ${r.added} 个新网站`);
     await loadSites();
-  } catch (err) { alert("导入失败：" + err.message); }
+  } catch (err) { toast("导入失败：" + err.message); }
   e.target.value = "";
 });
 
@@ -516,7 +556,7 @@ $("rec-start").addEventListener("click", async () => {
   const url = $("rec-url").value.trim();
   if (!url) { $("rec-url").focus(); return; }
   $("rec-start").disabled = true;
-  try { await api("/api/flows/record", {url}); } catch (e) { alert("开始录制失败：" + e.message); }
+  try { await api("/api/flows/record", {url}); } catch (e) { toast("开始录制失败：" + e.message); }
   pollRecording();
 });
 $("rec-save").addEventListener("click", async () => {
@@ -524,7 +564,7 @@ $("rec-save").addEventListener("click", async () => {
   try {
     await api("/api/flows/stop", {name: $("rec-name").value, description: $("rec-desc").value});
     $("rec-name").value = ""; $("rec-desc").value = "";
-  } catch (e) { alert("保存失败：" + e.message); }
+  } catch (e) { toast("保存失败：" + e.message); }
   pollRecording(); loadFlows();
 });
 $("rec-cancel").addEventListener("click", async () => {
@@ -546,7 +586,7 @@ $("flows").addEventListener("click", async (e) => {
     try {
       const r = await api("/api/flows/run", {name: b.dataset.run, params});
       b.textContent = "完成，已在浏览器打开";
-    } catch (err) { alert("运行失败：" + err.message); b.textContent = "试运行"; }
+    } catch (err) { toast("运行失败：" + err.message); b.textContent = "试运行"; }
     b.disabled = false;
   }
 });
@@ -593,8 +633,8 @@ $("mod-all").addEventListener("click", () => document.querySelectorAll("#modules
 $("mod-none").addEventListener("click", () => document.querySelectorAll("#modules input").forEach((c) => { c.checked = false; }));
 $("crawl-go").addEventListener("click", async () => {
   const modules = [...document.querySelectorAll("#modules input:checked")].map((c) => c.value);
-  if (!modules.length) { alert("请先勾选模块"); return; }
-  try { await api("/api/kb/crawl", {modules}); } catch (e) { alert("开始失败：" + e.message); }
+  if (!modules.length) { toast("请先勾选模块"); return; }
+  try { await api("/api/kb/crawl", {modules}); } catch (e) { toast("开始失败：" + e.message); }
   loadKb();
 });
 $("cap-go").addEventListener("click", async () => {
@@ -612,7 +652,7 @@ $("up-files").addEventListener("change", async (e) => {
   for (const f of files) {
     $("up-status").textContent = `导入中… ${f.name}`;
     try { await api("/api/kb/upload", {name: f.name, data: await fileBase64(f), module: $("up-module").value}); ok++; }
-    catch (err) { alert(`${f.name} 导入失败：${err.message}`); }
+    catch (err) { toast(`${f.name} 导入失败：${err.message}`); }
   }
   $("up-status").textContent = `已导入 ${ok}/${files.length} 个文件`;
   e.target.value = "";
@@ -653,9 +693,11 @@ function notifyCaptcha(j) {
   } catch (e) {}
 }
 
+let audio = null;  // one shared context: creating one per beep leaks audio resources
 function beep() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === "suspended") ctx.resume();
     const osc = ctx.createOscillator();
     osc.frequency.value = 880;
     osc.connect(ctx.destination);
@@ -664,7 +706,12 @@ function beep() {
   } catch (e) {}
 }
 
-setInterval(() => { for (const id of running) refresh(id); }, 800);
+let ticks = 0;
+setInterval(() => {
+  ticks++;
+  if (document.hidden && ticks % 3) return;  // in the background: every 3 s is enough
+  for (const id of running) refresh(id);
+}, 1000);
 init();
 try { const v = localStorage.getItem("qp-view"); if (["login", "flows", "kb"].includes(v)) showView(v); } catch (e) {}
 $("q").focus();
