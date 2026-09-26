@@ -129,3 +129,14 @@ def test_ask_and_eval_run_the_real_solver(monkeypatch, capsys, tmp_path):
     assert cli.main(["eval", str(practice)]) == 0
     out = capsys.readouterr().out
     assert "1/1 correct" in out and "[11]" in out
+
+
+def test_judge_questions_pasted_with_a_b_options_accept_letter_answers():
+    from quizpilot.question import parse_question
+    from quizpilot.solver import normalize_answer
+
+    q = parse_question("1.判断题\t用万方首页的检索框检索文献，可以选择的检索字段有题名。（）\nA.正确\nB.错误")
+    assert q.kind == "judge"
+    assert [normalize_answer(q, a) for a in ("B", "b", "B.错误", "A", "(A)", "错", "正确", "C")] == \
+        ["错", "错", "错", "对", "对", "错", "对", ""]
+    assert parse_question("判断题 某说法。（）\nA.正确\nB.错误\n正确答案：B").expected == "错"

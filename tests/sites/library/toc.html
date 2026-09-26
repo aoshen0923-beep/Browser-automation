@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8"><title>Science Vol 366 Issue 6470</title>
+<nav><a href="#">THIS WEEK IN SCIENCE</a> <a href="#">EDITORIAL</a> <a href="#">RESEARCH ARTICLES</a> <a href="#">REPORTS</a></nav>
+<p>Date range <input id="d1" readonly placeholder="开始日期"> - <input id="d2" readonly placeholder="结束日期"></p>
+<h2>Editorial</h2><div>An editorial <a href="#">Download PDF</a></div>
+<h2>Research Articles</h2>
+<div id="ra"></div>
+<h2>Reports</h2>
+<div id="rep"></div>
+<ul><li>口服抗凝药物致严重皮肤不良反应的文献分析 <i class="iconfont icon-kaisuo"></i></li>
+<li>二甲双胍修饰骨髓间充质干细胞外泌体调节软骨细胞的作用及机制</li></ul>
+<script>
+  ra.innerHTML = Array.from({length: 8}, (_, i) => `<div>Research article ${i + 1} <a href="#">Abstract</a> <a href="#">Download PDF</a></div>`).join("");
+  rep.innerHTML = Array.from({length: 5}, (_, i) => `<div>Report ${i + 1} <a href="#">Download PDF</a></div>`).join("");
+</script>

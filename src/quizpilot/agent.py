@@ -90,6 +90,7 @@ RENDER_JS = r"""
       const ph = clean(el.placeholder || el.getAttribute('aria-label') || el.title || '');
       if (ph) s += ` placeholder="${ph.slice(0, 40)}"`;
       if (el.value) s += ` value="${clean(el.value).slice(0, 60)}"`;
+      if (el.readOnly) s += ' 只读(点它会弹出日期/选项选择器；type 也能直接写入)';
       return s + '>';
     }
     if (tag === 'textarea') return `[${ref}]<textarea${el.value ? ` value="${clean(el.value).slice(0, 60)}"` : ''}>`;
@@ -138,8 +139,12 @@ RENDER_JS = r"""
       const cls = typeof el.className === 'string' ? el.className : (el.getAttribute('class') || '');
       let hint = clean(el.getAttribute('aria-label') || el.getAttribute('title') || (t && t.textContent) ||
                        el.getAttribute('data-title') || el.getAttribute('data-tooltip') || '');
-      if (!hint && /open.?access|lock.?open|unlock|(^|[\s_-])oa([\s_-]|$)/i.test(cls)) hint = 'Open Access';
-      if (!hint && /(^|[\s_-])(free|gratis)([\s_-]|$)/i.test(cls)) hint = 'Free';
+      if (!hint && /open.?access|lock.?open|unlock|kaisuo|(^|[\s_-])oa([\s_-]|$)/i.test(cls)) hint = 'Open Access';
+      if (!hint && /(^|[\s_-])(free|gratis|mianfei)([\s_-]|$)/i.test(cls)) hint = 'Free';
+      if (!hint) {  // other telling icon classes (lock, pdf, download…): show the class name itself
+        const m = cls.match(/[\w-]*(lock|suo|pdf|download|xiazai|access|star|vip|new)[\w-]*/i);
+        if (m) hint = 'class=' + m[0];
+      }
       if (hint) { push(` [图标:${hint.slice(0, 40)}] `); return; }
     }
     if (SKIP.has(el.tagName)) return;
@@ -187,6 +192,10 @@ RENDER_JS = r"""
     }
     if (block) push('\n');
     if (el.tagName === 'IMG' && el.alt) push(` [图:${clean(el.alt).slice(0, 40)}] `);
+    else if (el.tagName === 'IMG') {
+      const src = (el.getAttribute('src') || '').split('?')[0].split('/').pop();
+      if (/open.?access|unlock|lock|kaisuo|(^|[_-])oa([_.-]|$)|free|pdf/i.test(src)) push(` [图:${src.slice(0, 40)}] `);
+    }
     for (const c of el.childNodes) walk(c);
     if (el.shadowRoot) for (const c of el.shadowRoot.childNodes) walk(c);
     if (el.tagName === 'TD' || el.tagName === 'TH') push(' | ');
@@ -254,6 +263,16 @@ async (url) => {
   let s = '';
   for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
   return btoa(s);
+}
+"""
+
+SET_VALUE_JS = r"""
+(e, v) => {
+  e.removeAttribute('readonly');
+  e.focus();
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value');
+  if (setter && setter.set) setter.set.call(e, v); else e.value = v;
+  for (const t of ['input', 'change', 'blur']) e.dispatchEvent(new Event(t, {bubbles: true}));
 }
 """
 
@@ -381,6 +400,28 @@ LOGIN_WALL = re.compile(r"请先登录|登录后(?:查看|下载|阅读|可)|需
                         r"Subscribe to (?:read|access)", re.I)
 
 
+def option_terms(text: str) -> list[str]:
+    """What must have been seen on a page for an option to be confirmed.
+
+    A short option ('Article Title', '按作者') is itself the term; a long
+    statement contributes its quoted names and English phrases.
+    """
+    text = text.strip().rstrip("。.")
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
+    if (not cjk and len(text) <= 40) or (cjk and len(text) <= 6):
+        return [text] if len(_norm(text)) >= 2 else []  # a label: 'Article Title', '按作者'
+    # A statement: only its quoted names and English terms have to appear verbatim.
+    terms = re.findall(r"[“\"'《「]([^”\"'》」]{2,200})[”\"'》」]", text)
+    terms += [t.strip() for t in re.findall(r"[A-Za-z][A-Za-z0-9 ,:.&+-]{2,200}[A-Za-z0-9]", text)]
+    seen, out = set(), []
+    for t in terms:
+        key = _norm(t)
+        if key and len(key) >= 3 and not any(key in other for other in seen):
+            seen.add(key)
+            out.append(t)
+    return out[:4]
+
+
 def _mark(status: str) -> str:
     status = status.strip()
     if status.startswith(("对", "正确", "是", "符合")):
@@ -464,6 +505,9 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
    只能当线索，要到官方网站核实；只凭这类网站作答时 confidence 不要超过0.5。
 7. 不要猜网站内部的网址（比如高级检索页、某期目录页），猜错就是错误页：从页面上点链接/按钮进入，
    除非下面的网站用法里给了网址。
+   界面类题目（有哪些字段/筛选项/选项）：选项名称和页面上的基本一致就算有——大小写、单复数、多一个修饰词
+   （如选项 Article、页面 Research Article）都算；完全找不到才算没有。题目常按出题时的界面出，别太死扣字面。
+   判断某篇论文/某条结果有没有某个标记（OA、免费、开锁图标），标记必须和这条结果在同一块里，别拿旁边另一条的标记当依据。
    多选题四个选项都要各自找到依据，options 里还有"待查"就继续查，全部核实完再 answer（时间到了除外）；
    判断题/单选题也要找到原文。常见题型：论文页数看文章页的 Pages 或 pdf 的"共N页"；"第N页有几张图/表"用 pdf page=N 看图注个数，
    没把握再加 look 看那一页；判断是否 OA 看检索结果/文章页的 Open Access 标记，多个选项要逐个核对，别凭印象。
@@ -516,6 +560,7 @@ def site_directory(sites: list[dict]) -> str:
 class Step:
     action: dict
     result: str
+    url: str = ""  # the page the action was taken on
 
 
 @dataclass
@@ -829,11 +874,11 @@ class Agent:
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
             try:
-                resp = await goto(page, url, 40000)
+                resp = await goto(page, url, 25000)
             except PlaywrightTimeout:
-                self._note_site(url, "slow", "打开很慢（40秒还没加载完），时间紧时优先用别的网站")
+                self._note_site(url, "slow", "打开很慢（25秒还没加载完），时间紧时优先用别的网站")
                 await self._wait_for_content(5)
-                return "页面加载很慢（40秒还没完全打开），先看已经显示出来的部分；是空白就换一个网站"
+                return "页面加载很慢（25秒还没完全打开），先看已经显示出来的部分（内容多半已经有了）；是空白就换一个网站"
             ctype = (resp.headers.get("content-type", "") if resp else "").lower()
             if "pdf" in ctype or (resp is None and self._is_pdf_url(url)):
                 return await self.read_pdf({"url": url})
@@ -894,7 +939,18 @@ class Agent:
         if kind == "type":
             el = self._element(a.get("ref"))
             await self.pointer.to_element(page, el)
-            await el.fill(str(a.get("text", "")), timeout=5000)
+            text = str(a.get("text", ""))
+            try:
+                readonly = await el.evaluate("e => !!(e.readOnly || e.disabled)", timeout=3000)
+            except Exception:
+                readonly = False
+            try:
+                if readonly:
+                    raise ValueError("read-only")
+                await el.fill(text, timeout=5000)
+            except Exception:
+                # Read-only date pickers and script widgets refuse typing: set the value like a script would.
+                await el.evaluate(SET_VALUE_JS, text)
             if a.get("enter"):
                 sig = await self._signature()
                 await el.press("Enter")
@@ -1071,14 +1127,25 @@ class Agent:
         lines = [ln.strip() for ln in _plain(await self._page_text()).splitlines() if ln.strip()]
         lines = [re.sub(r"\s+", " ", ln) for ln in lines]
         region, note = lines, "整页"
+        def heading(rows: list[str], label: str) -> int | None:
+            """The line that IS the heading (e.g. 'Research Articles'), before any menu line that mentions it."""
+            low = label.lower()
+            exact = [j for j, ln in enumerate(rows) if re.sub(r"[\s:：|/]+", " ", ln).strip().lower() == low]
+            if exact:
+                return exact[0]
+            short = [j for j, ln in enumerate(rows) if low in ln.lower() and len(ln) <= len(label) + 40]
+            if short:
+                return short[0]
+            return next((j for j, ln in enumerate(rows) if low in ln.lower()), None)
+
         if start_at:
-            i = next((j for j, ln in enumerate(lines) if start_at.lower() in ln.lower()), None)
+            i = heading(lines, start_at)
             if i is None:
                 return f"页面上没有“{start_at}”，没法确定从哪里开始数；换一个标题文字，或先 scroll/read 看看"
             region = lines[i + 1:]
             note = f"从“{start_at}”之后"
         if end_at:
-            j = next((k for k, ln in enumerate(region) if end_at.lower() in ln.lower()), None)
+            j = heading(region, end_at)
             if j is not None:
                 region = region[:j]
                 note += f"到“{end_at}”之前"
@@ -1135,7 +1202,7 @@ class Agent:
         head = f"【{i}】{url}"
         try:
             try:
-                resp = await goto(page, url, 40000)
+                resp = await goto(page, url, 25000)
             except PlaywrightTimeout:
                 resp = None
             ctype = (resp.headers.get("content-type", "") if resp else "").lower()
@@ -1171,7 +1238,7 @@ class Agent:
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
             out = [f"{head}\n标题：{snap['title']}"]
             for word in words[:5]:
-                hits = [" / ".join(lines[max(0, j - 1): j + 2])[:300]
+                hits = [" / ".join(lines[max(0, j - 2): j + 2])[:360]
                         for j, ln in enumerate(lines) if word.lower() in ln.lower()][:6]
                 out.append(f"“{word}”：" + ("\n  ".join(hits) if hits else "页面中没有"))
             out.append("开头内容：" + " ".join(lines)[:900])
@@ -1309,6 +1376,8 @@ class Agent:
         if self._checks:
             parts.append("\n各选项目前的核实情况（你之前记下的）：")
             parts += [f"{k}{_mark(v)} {v}" for k, v in sorted(self._checks.items())]
+            for _, warning in self._suspicious(q):
+                parts.append(f"程序核对：{warning}")
             todo = self._unchecked(q)
             if todo and not force:
                 parts.append(f"还没核实的：{'、'.join(todo)}——先把它们查清楚再 answer。")
@@ -1362,10 +1431,29 @@ class Agent:
         if self._checks != before and self._checks:
             self.log("  核实：" + " ".join(f"{k}{_mark(v)}" for k, v in sorted(self._checks.items())))
 
+    def _suspicious(self, q: Question) -> list[tuple[str, str]]:
+        """Checklist marks that what was actually read doesn't support."""
+        if q.kind == JUDGE or not self._checks:
+            return []
+        corpus = _norm("\n".join(self._seen + [_plain(self._rendered)]))
+        out = []
+        for k, status in sorted(self._checks.items()):
+            text = q.options.get(k, "")
+            terms = option_terms(text)
+            mark = _mark(status)
+            if mark == "✓" and terms:
+                missing = [t for t in terms if _norm(t) not in corpus]
+                if missing:
+                    out.append((k, f"{k} 标了对，但选项里的“{missing[0]}”在看过的页面里从没出现过——是还没看到，还是猜的？去页面上确认"))
+            elif mark == "✗" and len(text) <= 12 and _norm(text) and _norm(text) in corpus:
+                out.append((k, f"{k} 标了错，但“{text}”在看过的页面里出现过（可能是相近的名称），确认一下"))
+        return out
+
     def _unchecked(self, q: Question) -> list[str]:
         if q.kind == JUDGE or not self._checks:
             return []
-        return [k for k in q.options if not _mark(self._checks.get(k, "待查")) in ("✓", "✗")]
+        doubtful = {k for k, _ in self._suspicious(q)}
+        return [k for k in q.options if _mark(self._checks.get(k, "待查")) not in ("✓", "✗") or k in doubtful]
 
     def _load_recipes(self, q: Question) -> None:
         self._recipes = []
@@ -1550,7 +1638,8 @@ class Agent:
                         final = action
                         break
                     label = f"[{n}{'abc'[j] if len(acts) > 1 else ''}]"
-                    repeat = _repeats(action, steps)
+                    here = self.page.url if self.page is not None and not self.page.is_closed() else ""
+                    repeat = _repeats(action, steps, here)
                     if repeat and kind == "open_many":
                         # Don't waste the step: look properly at the first page it wanted.
                         visited = {str(s.action.get("url", "")).rstrip("/") for s in steps if s.action.get("action") == "goto"}
@@ -1559,7 +1648,7 @@ class Agent:
                             self.log(f"  {label} (open_many 用够了，改为打开页面细看)")
                             action = {"action": "goto", "url": fresh[0]}
                             kind = "goto"
-                            repeat = _repeats(action, steps)
+                            repeat = _repeats(action, steps, here)
                     if repeat:
                         self.log(f"  {label} (skipped repeat) {_describe(action)}")
                         steps.append(Step(action, f"重复操作，已跳过：{repeat}。换一个方法，比如打开目录中的官方网站、换关键词，或根据已有信息直接 answer。"))
@@ -1579,7 +1668,7 @@ class Agent:
                         steps.append(Step(action, "被用户打断"))
                         interrupted = True
                         break
-                    steps.append(Step(action, result))
+                    steps.append(Step(action, result, self.page.url if self.page is not None and not self.page.is_closed() else ""))
                     self._remember(result)
                     if kind == "goto" and result.startswith("失败") and "ERR_" in result:
                         err = re.search(r"ERR_[A-Z_]+", result).group(0)
@@ -1653,9 +1742,18 @@ def unreliable(url: str) -> bool:
     return any(h in host for h in UNRELIABLE_HOSTS)
 
 
-def _repeats(action: dict, steps: list[Step]) -> str:
+def _repeats(action: dict, steps: list[Step], url: str = "") -> str:
     """A goto/search identical to an earlier one only loops; say which."""
     kind = action.get("action")
+    if kind in ("click", "type", "select", "hover", "click_xy") and url:
+        same = ("ref", "text", "option", "x", "y")
+        for s in steps[-8:]:
+            if s.url != url or s.action.get("action") != kind or any(s.action.get(k) != action.get(k) for k in same):
+                continue
+            if "没有任何变化" in s.result:
+                return "上次在这一页做同样的操作，页面没有任何变化；换一个元素（旁边的按钮/链接/图标），或者用 look 看看该点哪里"
+            if s.result.startswith("失败"):
+                return f"上次同样的操作失败了（{s.result[:60]}）；换一个方法"
     if kind == "open_many":
         mine = sorted(str(u).rstrip("/") for u in action.get("urls") or [])
         for s in steps:

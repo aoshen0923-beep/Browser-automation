@@ -56,12 +56,19 @@ def _find_options(text: str) -> tuple[int, dict[str, str]] | None:
     return None
 
 
-def normalize_judgement(value: str) -> str | None:
+def normalize_judgement(value: str, options: dict[str, str] | None = None) -> str | None:
     v = value.strip().rstrip("。.").lower()
     if v in {"对", "正确", "√", "true", "t", "yes", "是"}:
         return "对"
     if v in {"错", "错误", "×", "x", "false", "f", "no", "否"}:
         return "错"
+    # Judge questions pasted as "A.正确 B.错误" get answered with the letter ("B", "B.错误").
+    m = re.match(r"^[（(]?([a-d])(?:[)）.、:：\s]|$)\s*(.*)$", v)
+    if m:
+        if options and m.group(1).upper() in options:
+            return normalize_judgement(options[m.group(1).upper()])
+        if m.group(2):
+            return normalize_judgement(m.group(2))
     return None
 
 
@@ -101,7 +108,7 @@ def parse_question(raw: str, kind: str | None = None) -> Question:
 
     if expected is not None:
         if kind == JUDGE:
-            expected = normalize_judgement(expected) or expected
+            expected = normalize_judgement(expected, options) or expected
         else:
             expected = "".join(sorted(set(re.findall(r"[A-D]", expected.upper()))))
     module = module_m.group(1).zfill(2) if module_m else ""

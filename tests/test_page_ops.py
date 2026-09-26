@@ -302,3 +302,50 @@ def test_count_and_folded_filters(library, chrome):  # noqa: F811
             assert "没有“不存在”" in await agent.act({"action": "count", "text": "x", "from": "不存在"})
 
     asyncio.run(run())
+
+
+def test_fixes_from_the_exported_run_records(library, chrome):  # noqa: F811
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, None, [], None, log=lambda *_: None)
+            agent.page = await agent._open_tab()
+            await agent.act({"action": "goto", "url": library + "/toc.html"})
+            obs = await agent.observe()
+            # Science TOC: the section menu mentions RESEARCH ARTICLES before the heading does.
+            out = await agent.act({"action": "count", "text": "Download PDF", "from": "Research Articles", "to": "Reports"})
+            assert "共 8 行" in out, out
+            # CNKI date boxes are read-only pickers: typing still sets them.
+            assert "只读" in obs
+            ref = ref_in_line(obs, "Date range", "<input")
+            assert (await agent.act({"action": "type", "ref": ref, "text": "2022-01-01"})) == "已输入"
+            assert await agent.page.input_value("#d1") == "2022-01-01"
+            # VIP's orange unlock icon is a text-less <i class="icon-kaisuo">, on its own paper's line.
+            assert re.search(r"口服抗凝药物致严重皮肤不良反应的文献分析 \[图标:Open Access\]", obs), obs
+            assert not re.search(r"二甲双胍.*图标", obs)
+
+    asyncio.run(run())
+
+
+def test_no_blind_retries_and_checklist_marks_are_checked():
+    from quizpilot.agent import Step, _repeats
+    from quizpilot.question import parse_question
+
+    page = "https://www.cell.com/cell"
+    steps = [Step({"action": "click", "ref": 57}, "已点击，但页面没有任何变化：…", page)]
+    assert "没有任何变化" in _repeats({"action": "click", "ref": 57}, steps, page)
+    assert _repeats({"action": "click", "ref": 58}, steps, page) == ""
+    assert _repeats({"action": "click", "ref": 57}, steps, "https://www.cell.com/other") == ""
+    failed = [Step({"action": "type", "ref": 227, "text": "2022"}, "失败：TimeoutError: Timeout 5000ms exceeded.", page)]
+    assert "失败" in _repeats({"action": "type", "ref": 227, "text": "2022"}, failed, page)
+
+    q = parse_question("在《cell》官网的高级检索中，可选的检索字段包括（ ）。\nA. Article Title\nB. Authors\nC. DOI\nD. Affiliation", "multi")
+    agent = Agent(None, None, [], None, log=lambda *_: None)
+    agent._seen = ["Search within: All Fields | Article Title | Authors | Keywords"]
+    agent._checks = {"A": "对：下拉里有", "B": "对：下拉里有", "C": "对：同一字段下拉列表", "D": "错：没看到"}
+    notes = dict(agent._suspicious(q))
+    assert set(notes) == {"C"} and "DOI" in notes["C"]  # C was marked right without ever seeing "DOI"
+    assert agent._unchecked(q) == ["C"]
+    tf = parse_question("Article Type 筛选项下的选项包括（）\nA. Article\nB. Review Article\nC. Book Review\nD. Editorial", "multi")
+    agent._seen = ["Article Type: Research Article (2893849) / Review Article (95345) / Book Review / Editorial"]
+    agent._checks = {"A": "错：没有独立的Article", "B": "对", "C": "对", "D": "对"}
+    assert "出现过" in dict(agent._suspicious(tf))["A"]  # 'Article' does appear (as Research Article)

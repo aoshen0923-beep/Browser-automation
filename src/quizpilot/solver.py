@@ -68,7 +68,7 @@ def build_prompt(q: Question, hits: list[Hit]) -> str:
 def normalize_answer(q: Question, raw: object) -> str:
     text = str(raw or "").strip()
     if q.kind == JUDGE:
-        return normalize_judgement(text) or ""
+        return normalize_judgement(text, q.options) or ""
     letters = "".join(sorted(set(re.findall(r"[A-D]", text.upper())) & set(q.options)))
     if q.kind == SINGLE and len(letters) != 1:
         return ""
