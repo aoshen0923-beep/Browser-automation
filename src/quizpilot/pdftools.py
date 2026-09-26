@@ -7,7 +7,8 @@ deterministically here instead of trusting a language model to count.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pymupdf
@@ -23,6 +24,29 @@ class PageInfo:
     first_text: str
     last_text: str
     last_char: str
+    figures: list[str] = field(default_factory=list)  # captions starting on this page: "Figure 2", "图3"
+    tables: list[str] = field(default_factory=list)
+
+
+# A caption starts a line: "Figure 2:", "Fig. 3.", "图 4", "Table 1", "表2".
+# English captions need the colon/period ("Figure 2 shows…" in running text is not one).
+_CAPTION = re.compile(r"^(?:(Figure|Fig\.?|FIGURE|Table|TABLE)\s*(\d+(?:[.-]\d+)?)\s*[:：.．|]"
+                      r"|(图|表)\s*(\d+(?:[.-]\d+)?)(?:\s|[:：.．]|$))")
+
+
+def captions(text: str) -> tuple[list[str], list[str]]:
+    figures, tables = [], []
+    for line in text.splitlines():
+        m = _CAPTION.match(line.strip())
+        if not m:
+            continue
+        kind, num = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+        is_table = kind.lower().startswith("tab") or kind == "表"
+        name = ("Table " if kind[0] in "Tt" else "表" if kind == "表" else "图" if kind == "图" else "Figure ") + num
+        target = tables if is_table else figures
+        if name not in target:
+            target.append(name)
+    return figures, tables
 
 
 def _label(page: pymupdf.Page) -> str:
@@ -41,6 +65,7 @@ def page_info(page: pymupdf.Page) -> PageInfo:
     compact = _visible(text)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     label = _label(page)
+    figures, tables = captions(text)
     return PageInfo(
         number=page.number + 1,
         label=label,
@@ -50,6 +75,8 @@ def page_info(page: pymupdf.Page) -> PageInfo:
         first_text=lines[0] if lines else "",
         last_text=lines[-1] if lines else "",
         last_char=compact[-1] if compact else "",
+        figures=figures,
+        tables=tables,
     )
 
 

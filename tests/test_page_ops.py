@@ -181,3 +181,52 @@ def test_pointer_shows_where_the_agent_clicks(library, chrome):  # noqa: F811
             assert await off.page.evaluate("() => !document.getElementById('__qp_pointer')")
 
     asyncio.run(run())
+
+
+@pytest.fixture
+def gated(chrome):  # noqa: F811
+    """The library site, but PDFs only reach real browser pages (like sites behind Cloudflare)."""
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=str(SITE_DIR), **kw)
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path.endswith(".pdf") and not self.headers.get("Sec-Fetch-Mode"):
+                body = b"<html>Just a moment...</html>"  # the API request is challenged
+                self.send_response(403)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def test_oa_icons_blocked_pdfs_and_figure_captions(gated, chrome):  # noqa: F811
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, None, [], None, log=lambda *_: None)
+            agent.page = await agent._open_tab()
+            await agent.act({"action": "goto", "url": gated + "/paper.html"})
+            obs = await agent.observe()
+            # The text-less lock icon is shown on its own result's line.
+            assert re.search(r"Outlier detection.*\[图标:Open Access\]", obs), obs
+            assert "Embedding Democratic Values" in obs and not re.search(r"Democratic Values.*图标", obs)
+            # The API download is challenged; reading from inside the page works.
+            out = await agent.act({"action": "pdf", "url": gated + "/gated.pdf", "page": 2})
+            assert "共2页" in out and "图注 2 个（Figure 1、Figure 2）" in out and "表注 1 个（Table 1）" in out, out
+            # A download link hands over the file, which is read at once.
+            agent._pdf_cache.clear()
+            obs = await agent.observe()
+            out = await agent.act({"action": "click", "ref": ref_in_line(obs, "下载全文", "<a")})
+            assert "下载了文件" in out and "共2页" in out, out
+
+    asyncio.run(run())

@@ -15,7 +15,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus, urljoin, urlparse
 
 from playwright.async_api import Page
 from playwright.async_api import TimeoutError as PlaywrightTimeout
@@ -123,7 +123,18 @@ RENDER_JS = r"""
     }
     if (node.nodeType !== 1) return;
     const el = node;
-    if (SKIP.has(el.tagName) || skipDialogs.has(el) || el.id === '__qp_pointer') return;
+    if (el.id === '__qp_pointer' || skipDialogs.has(el)) return;
+    // Text-less badges and icons ("Open Access", "PDF", lock icons) still carry meaning.
+    if (!el.textContent.trim() && !el.matches(INTERACTIVE) && el.tagName !== 'IMG' && shown(el)) {
+      const t = el.tagName === 'svg' || el.tagName === 'SVG' ? el.querySelector('title') : null;
+      const cls = typeof el.className === 'string' ? el.className : (el.getAttribute('class') || '');
+      let hint = clean(el.getAttribute('aria-label') || el.getAttribute('title') || (t && t.textContent) ||
+                       el.getAttribute('data-title') || el.getAttribute('data-tooltip') || '');
+      if (!hint && /open.?access|lock.?open|unlock|(^|[\s_-])oa([\s_-]|$)/i.test(cls)) hint = 'Open Access';
+      if (!hint && /(^|[\s_-])(free|gratis)([\s_-]|$)/i.test(cls)) hint = 'Free';
+      if (hint) { push(` [图标:${hint.slice(0, 40)}] `); return; }
+    }
+    if (SKIP.has(el.tagName)) return;
     if (!shown(el)) return;
     const block = BLOCK.has(el.tagName);
     const hard = el.matches(INTERACTIVE) || typeof el.onclick === 'function';
@@ -227,6 +238,17 @@ LOADING_JS = r"""
 }
 """
 
+# Download a file from inside the page (base64), using the page's own cookies.
+FETCH_JS = r"""
+async (url) => {
+  const r = await fetch(url, {credentials: 'include'});
+  const b = new Uint8Array(await r.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+"""
+
 SCROLL_JS = r"""
 (dir) => {
   const se = document.scrollingElement || document.documentElement;
@@ -279,6 +301,36 @@ NEXT_PAGE_JS = r"""
   return 'ok';
 }
 """
+
+
+# How to use the big databases quickly (URL patterns, where the answer-bearing labels are).
+SITE_TIPS = {
+    "dl.acm.org": "检索直接用 https://dl.acm.org/action/doSearch?AllField=论文标题 ；结果和文章页上的 OPEN ACCESS"
+                  " 标记（可能显示为 [图标:…]）表示OA；文章页的 Pages 1 - N 就是页数；全文PDF是"
+                  " https://dl.acm.org/doi/pdf/DOI ，用 pdf 动作读（page=2 可看第2页的图注）",
+    "ieeexplore.ieee.org": "检索直接用 https://ieeexplore.ieee.org/search/searchresult.jsp?queryText=关键词",
+    "link.springer.com": "检索直接用 https://link.springer.com/search?query=关键词 ；Open access 文章有标记",
+    "sciencedirect.com": "检索直接用 https://www.sciencedirect.com/search?qs=关键词 ；Open access 文章有标记",
+    "arxiv.org": "摘要页 https://arxiv.org/abs/编号 ，PDF https://arxiv.org/pdf/编号 （用 pdf 动作读）",
+    "pubmed.ncbi.nlm.nih.gov": "检索直接用 https://pubmed.ncbi.nlm.nih.gov/?term=关键词",
+    "onlinelibrary.wiley.com": "检索直接用 https://onlinelibrary.wiley.com/action/doSearch?AllField=关键词",
+}
+
+
+TIP_NAMES = {"acm": "dl.acm.org", "ieee": "ieeexplore.ieee.org", "springer": "link.springer.com",
+             "sciencedirect": "sciencedirect.com", "elsevier": "sciencedirect.com", "arxiv": "arxiv.org",
+             "pubmed": "pubmed.ncbi.nlm.nih.gov", "wiley": "onlinelibrary.wiley.com"}
+
+
+def tips_for_question(text: str) -> list[str]:
+    low = text.lower()
+    hosts = dict.fromkeys(h for name, h in TIP_NAMES.items() if name in low)
+    return [f"{h}：{SITE_TIPS[h]}" for h in hosts]
+
+
+def site_tips(url: str) -> str:
+    host = memory._host(url)
+    return next((tip for h, tip in SITE_TIPS.items() if host == h or host.endswith("." + h)), "")
 
 
 def _plain(text: str) -> str:
@@ -344,7 +396,10 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
 5. 页面需要登录或出现验证码时，程序会暂停等用户处理，你继续即可。
 6. 题库、答案分享、问答类网站（如 itihey、百度知道、百度文库、作业帮、道客巴巴）上的答案经常是错的，
    只能当线索，要到官方网站核实；只凭这类网站作答时 confidence 不要超过0.5。
-7. 答案常在页面后半部分（详情、表格、全文、名单）：页面文字被截断时先用 find 查题目关键词或用 read 读后面的内容，
+7. 常见题型：论文页数看文章页的 Pages 或 pdf 的"共N页"；"第N页有几张图/表"用 pdf page=N 看图注个数，
+   没把握再加 look 看那一页；判断是否 OA 看检索结果/文章页的 Open Access 标记，多个选项要逐个核对，别凭印象。
+   浏览器里打开的 PDF 你翻不了页，一律用 pdf 动作读。
+   答案常在页面后半部分（详情、表格、全文、名单）：页面文字被截断时先用 find 查题目关键词或用 read 读后面的内容，
    看全了再 answer，不要只看开头就下结论；每个选项都要在页面上找到依据。
 8. 页面文字里 [编号]<a>文字</a> 标出了可以点的元素，就在它在页面上的位置，根据周围文字判断点哪个
    （比如某条结果那一行后面的「下载」「详情」）；编号在同一页面上一直有效。点击后程序会告诉你页面有没有变化，
@@ -482,6 +537,7 @@ class Agent:
         self._saved: set[str] = set()
         self._prepared: set = set()
         self._rendered = ""
+        self._downloads: list[str] = []
         self._window_end = 0
         self._seen: list[str] = []
         self._checked_evidence = False
@@ -512,6 +568,7 @@ class Agent:
                 await route.continue_()
 
         await page.route("**/*", handler)
+        page.on("download", lambda d: self._downloads.append(d.url))
 
     async def _settle(self) -> None:
         busy = False
@@ -598,7 +655,11 @@ class Agent:
     async def observe(self) -> str:
         page = self.page
         if self._is_pdf_url(page.url):
-            return f"当前页是PDF：{page.url}\n用 pdf 动作读取。"
+            try:
+                summary = await asyncio.wait_for(self.read_pdf({"url": page.url}), 60)
+            except Exception:
+                summary = ""
+            return f"当前页是PDF（浏览器里的PDF你翻不了页，用 pdf 动作按页读取）：{page.url}\n{summary}"
         try:
             snap = await self._render()
         except asyncio.TimeoutError:
@@ -623,6 +684,8 @@ class Agent:
             notes = memory.site_notes(self.kb, host)
             if notes:
                 parts.append("关于这个网站以前的经验：" + "；".join(notes[-4:]))
+            if site_tips(snap["url"]):
+                parts.append("这个网站的用法：" + site_tips(snap["url"]))
         note = f"页面文字（共{len(text)}字"
         if start:
             note += f"；从当前屏幕位置开始显示，上面还有{start}字，需要时用 read（from=0）"
@@ -671,6 +734,16 @@ class Agent:
         kind = a.get("action")
         page = self.page
         before = len(self.browser.context.pages)
+        downloads = len(self._downloads)
+        result = await self._act(a, kind, page, before)
+        if len(self._downloads) > downloads and kind in ("goto", "click", "click_xy", "next_page"):
+            # The site sent a file instead of a page (e.g. a PDF download button): read it.
+            url = self._downloads[-1]
+            text = await self.read_pdf({"url": url, **{k: a[k] for k in ("page", "find", "look") if k in a}})
+            return f"下载了文件 {url}\n{text}"
+        return result
+
+    async def _act(self, a: dict, kind, page, before) -> str:
         if kind == "goto":
             url = str(a.get("url", "")).strip()
             if not url.startswith(("http://", "https://")):
@@ -682,7 +755,7 @@ class Agent:
                 await self._wait_for_content(5)
                 return "页面加载很慢（40秒还没完全打开），先看已经显示出来的部分；是空白就换一个网站"
             ctype = (resp.headers.get("content-type", "") if resp else "").lower()
-            if "pdf" in ctype:
+            if "pdf" in ctype or (resp is None and self._is_pdf_url(url)):
                 return await self.read_pdf({"url": url})
             await self._settle()
             return "已打开"
@@ -923,15 +996,46 @@ class Agent:
         more = f"；后面还有，用 read（from={end}）继续" if end < len(text) else "，已读到末尾"
         return f"页面第{start}-{end}字（共{len(text)}字{more}）：\n{text[start:end]}"
 
+    async def _fetch_in_page(self, url: str) -> bytes:
+        """Download with the browser's own session (cookies, anti-bot checks passed)."""
+        from base64 import b64decode
+
+        origin = urlparse(url)
+        pages = [self.page, *self.browser.context.pages]
+        for page in pages:
+            try:
+                if page.is_closed() or urlparse(page.url).netloc != origin.netloc:
+                    continue
+                data = await asyncio.wait_for(page.evaluate(FETCH_JS, url), 60)
+                return b64decode(data) if data else b""
+            except Exception:
+                continue
+        return b""
+
+    async def _pdf_bytes(self, url: str) -> bytes:
+        if url in self._pdf_cache:
+            return self._pdf_cache[url]
+        data = b""
+        try:
+            resp = await self.browser.context.request.get(url, timeout=60000)
+            data = await resp.body()
+        except Exception:
+            pass
+        if not data.lstrip()[:5].startswith(b"%PDF"):
+            # Blocked (Cloudflare etc.) or needs the login session: fetch from inside the site's own page.
+            data = await self._fetch_in_page(url) or data
+        if data.lstrip()[:5].startswith(b"%PDF"):
+            self._pdf_cache[url] = data
+        return data
+
     async def read_pdf(self, a: dict) -> str:
         url = str(a.get("url") or self.page.url)
-        if url not in self._pdf_cache:
-            resp = await self.browser.context.request.get(url, timeout=60000)
-            self._pdf_cache[url] = await resp.body()
+        data = await self._pdf_bytes(url)
         try:
-            doc = pdftools.open_pdf(self._pdf_cache[url])
+            doc = pdftools.open_pdf(data)
         except Exception:
-            return f"{url} 不是可读取的PDF"
+            return (f"{url} 没能下载到PDF（可能被网站拦截或要登录）。可以打开论文页面点「PDF」按钮，"
+                    "在PDF页面上再用 pdf 动作；或者看文章页面上写的页数等信息")
         with doc:
             total = doc.page_count
             texts = pdftools.page_texts(doc)
@@ -956,8 +1060,12 @@ class Agent:
                     out.append(f"第{n}页 " + await self._ask_image(pdftools.page_png(doc, n), str(a["look"])))
                 if 1 <= n <= total:
                     info = pdftools.page_info(doc[n - 1])
+                    figs = "、".join(info.figures) or "无"
+                    tabs = "、".join(info.tables) or "无"
                     out.append(
-                        f"第{n}页（印刷页码 {info.label or '-'}）：{info.images}张图片，最后一个字“{info.last_char}”\n"
+                        f"第{n}页（印刷页码 {info.label or '-'}）：图注 {len(info.figures)} 个（{figs}），表注 {len(info.tables)} 个（{tabs}），"
+                        f"嵌入位图 {info.images} 张、矢量绘图 {info.drawings} 处（论文的图常是矢量图，数图以图注为准，"
+                        f"没把握就加 look 看这一页），最后一个字“{info.last_char}”\n"
                         + _clip(doc[n - 1].get_text(), 3000)
                     )
             elif not needle:
@@ -976,6 +1084,8 @@ class Agent:
             for s in hints:
                 parts.append(f"- 模块{s['module']} {s['title']}：{' '.join(s['urls'][:6])}")
                 for url in s["urls"][:3]:
+                    if site_tips(url):
+                        parts.append(f"  （{memory._host(url)} 用法：{site_tips(url)}）")
                     notes = memory.site_notes(self.kb, url)
                     if notes:
                         parts.append(f"  （{memory._host(url)} 以前的经验：{'；'.join(notes[-3:])}）")
@@ -984,6 +1094,10 @@ class Agent:
             for f in self._flows:
                 example = {p["name"]: p["example"] for p in f.params}
                 parts.append(f"- {f.summary()}\n  用法：{json.dumps({'action': 'flow', 'name': f.name, 'params': example}, ensure_ascii=False)}（把参数换成本题的值）")
+        named = tips_for_question(q.stem)
+        if named:
+            parts.append("\n题目提到的数据库的用法（照着做最快）：")
+            parts += [f"- {t}" for t in named]
         if self._known:
             parts.append(f"\n这道题以前做过并核实过：正确答案是 {self._known}。如果题目完全一样，直接 answer。")
         if self._lessons:
