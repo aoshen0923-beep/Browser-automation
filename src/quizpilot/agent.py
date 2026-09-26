@@ -403,6 +403,8 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
    没把握再加 look 看那一页；判断是否 OA 看检索结果/文章页的 Open Access 标记，多个选项要逐个核对，别凭印象。
    浏览器里打开的 PDF 你翻不了页，一律用 pdf 动作读。
    要分别核对几个选项/几篇论文时，用 open_many 一次同时打开（每个一个检索网址），不要一个个来。
+   open_many 只返回关键词附近的几行；选项要在网站里操作才能核对的（检索界面有哪些字段、筛选项、过刊目录、某期有几篇），
+   直接 goto 那个页面去点、去看，不要反复 open_many。
    答案常在页面后半部分（详情、表格、全文、名单）：页面文字被截断时先用 find 查题目关键词或用 read 读后面的内容，
    看全了再 answer，不要只看开头就下结论；每个选项都要在页面上找到依据。
 8. 页面文字里 [编号]<a>文字</a> 标出了可以点的元素，就在它在页面上的位置，根据周围文字判断点哪个
@@ -542,6 +544,7 @@ class Agent:
         self._prepared: set = set()
         self._rendered = ""
         self._downloads: list[str] = []
+        self._kept = None
         self.trace: list[dict] = []  # everything the model saw and did, for the run record
         self._window_end = 0
         self._seen: list[str] = []
@@ -1010,12 +1013,25 @@ class Agent:
         if not urls:
             return "open_many 需要 urls（网址列表）"
         words = [w.strip() for w in str(a.get("find", "")).split("|") if w.strip()]
+        self._kept = None
         results = await asyncio.gather(*(self._peek(i, url, words) for i, url in enumerate(urls, 1)))
-        await self.page.bring_to_front()
+        kept, self._kept = self._kept, None
+        if kept is not None:
+            # Stay on the first page read, so the next step can click and scroll there.
+            old = self.page
+            self.page = kept
+            await kept.bring_to_front()
+            if old is not None and old is not kept and (old.url in ("", "about:blank") or old.url.startswith("chrome")):
+                try:
+                    await old.close()
+                except Exception:
+                    pass
+            results.append(f"（现在停在【1】{kept.url} 上，要细看、点击、翻页就直接在这一页操作；不要再用 open_many 反复打开同样的网址）")
         return "\n\n".join(results)
 
     async def _peek(self, i: int, url: str, words: list[str]) -> str:
         page = await self._open_tab()
+        keep = False
         head = f"【{i}】{url}"
         try:
             try:
@@ -1039,7 +1055,8 @@ class Agent:
                 await asyncio.sleep(0.8)
             if await page_blocked(page):
                 self._note_site(url, "captcha", "出现过人机验证，别连续快速打开很多页面")
-                return f"{head}\n这个页面要人机验证，没读到内容（标签页留着，可以之后再处理）"
+                self.log(f"  (后台标签页要人机验证：{url[:70]}，已留在浏览器里)")
+                return f"{head}\n这个页面要人机验证，没读到内容（标签页留着）；要看它就 goto 这个网址，程序会等用户完成验证"
             snap = await asyncio.wait_for(page.evaluate(RENDER_JS, {"prefix": "", "navCap": 15}), 20)
             text = _plain(snap["text"])
             self._save(snap["url"], snap["title"], snap["text"])
@@ -1050,12 +1067,15 @@ class Agent:
                         for j, ln in enumerate(lines) if word.lower() in ln.lower()][:6]
                 out.append(f"“{word}”：" + ("\n  ".join(hits) if hits else "页面中没有"))
             out.append("开头内容：" + " ".join(lines)[:900])
+            if i == 1:
+                keep = True
+                self._kept = page
             return "\n".join(out)
         except Exception as e:
             return f"{head}\n打开失败：{type(e).__name__}: {str(e).splitlines()[0][:120] if str(e) else ''}"
         finally:
             try:
-                if not await page_blocked(page):
+                if not keep and not await page_blocked(page):
                     await page.close()
             except Exception:
                 pass
@@ -1489,6 +1509,14 @@ def unreliable(url: str) -> bool:
 def _repeats(action: dict, steps: list[Step]) -> str:
     """A goto/search identical to an earlier one only loops; say which."""
     kind = action.get("action")
+    if kind == "open_many":
+        mine = sorted(str(u).rstrip("/") for u in action.get("urls") or [])
+        for s in steps:
+            if s.action.get("action") == "open_many" and sorted(str(u).rstrip("/") for u in s.action.get("urls") or []) == mine:
+                return "之前已经同时打开过这些网址"
+        if sum(s.action.get("action") == "open_many" for s in steps[-3:]) >= 2:
+            return "已经连续用了两次 open_many；接下来 goto 到最相关的那个页面，在页面上点击、检索、翻页细看"
+        return ""
     key = {"goto": "url", "search": "query"}.get(kind)
     if not key:
         return ""

@@ -84,7 +84,7 @@ def test_cut_off_reply_is_retried_then_salvaged():
 
     client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
     got = client.chat_json("s", "u")
-    assert got["answer"] == "B" and len(calls) == 2 and calls[1] == calls[0] * 3
+    assert got["answer"] == "B" and len(calls) == 3 and calls[1] == calls[0] * 3 and calls[2] == calls[1] * 3
 
 
 def test_images_are_sent_and_rejection_is_recognized():

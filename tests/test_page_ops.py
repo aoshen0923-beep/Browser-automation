@@ -251,8 +251,19 @@ def test_open_many_checks_several_pages_at_once(gated, chrome):  # noqa: F811
             assert "【2】" in out and "基于深度学习的儿童口罩佩戴检测研究" in out
             assert "【3】" in out and "共2页" in out
             assert "【4】" in out and "口罩相关研究第1篇" in out
-            assert len(browser.context.pages) == tabs  # background tabs closed again
-            assert agent.page.url.endswith("/paper.html")  # still on its own page
+            # The other background tabs close; the agent now stands on the first page, ready to click there.
+            assert len(browser.context.pages) == tabs + 1
+            assert agent.page.url.endswith("/paper.html?x") and "现在停在【1】" in out
+            obs = await agent.observe()
+            assert "Outlier detection" in obs
+            from quizpilot.agent import Step, _repeats
+
+            same = {"action": "open_many", "urls": [gated + "/detail.html?id=17", gated + "/paper.html?x"]}
+            other = {"action": "open_many", "urls": [gated + "/c1.html"]}
+            steps = [Step({"action": "open_many", "urls": [gated + "/paper.html?x", gated + "/detail.html?id=17"]}, "")]
+            assert "已经同时打开过" in _repeats(same, steps)
+            assert _repeats(other, steps) == ""
+            assert "连续用了两次" in _repeats(other, steps + [Step({"action": "open_many", "urls": ["x"]}, "")])
             return took
 
     took = asyncio.run(run())

@@ -82,7 +82,7 @@ class OpenAICompatible:
         # return empty content; retry once with a much larger budget.
         budget = max(max_tokens, 1500)
         salvaged: dict | None = None
-        for attempt in range(2):
+        for attempt in range(3):  # 1500 → 4500 → 13500 tokens for hard multi-choice questions
             content, finish = self._complete(system, user, budget, images)
             if content.strip():
                 try:
