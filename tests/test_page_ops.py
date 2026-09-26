@@ -230,3 +230,30 @@ def test_oa_icons_blocked_pdfs_and_figure_captions(gated, chrome):  # noqa: F811
             assert "下载了文件" in out and "共2页" in out, out
 
     asyncio.run(run())
+
+
+def test_open_many_checks_several_pages_at_once(gated, chrome):  # noqa: F811
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, None, [], None, log=lambda *_: None)
+            agent.page = await agent._open_tab()
+            await agent.act({"action": "goto", "url": gated + "/paper.html"})
+            tabs = len(browser.context.pages)
+            t0 = asyncio.get_running_loop().time()
+            out = await agent.act({"action": "open_many", "find": "Open Access|基金|Figure 1", "urls": [
+                gated + "/paper.html?x",
+                gated + "/detail.html?id=17",  # plain page
+                gated + "/gated.pdf",          # a guarded PDF
+                gated + "/results.html",       # a page whose list loads by script
+            ]})
+            took = asyncio.get_running_loop().time() - t0
+            assert "【1】" in out and re.search(r"“Open Access”：Outlier detection", out), out
+            assert "【2】" in out and "基于深度学习的儿童口罩佩戴检测研究" in out
+            assert "【3】" in out and "共2页" in out
+            assert "【4】" in out and "口罩相关研究第1篇" in out
+            assert len(browser.context.pages) == tabs  # background tabs closed again
+            assert agent.page.url.endswith("/paper.html")  # still on its own page
+            return took
+
+    took = asyncio.run(run())
+    assert took < 15, took

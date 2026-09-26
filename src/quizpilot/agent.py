@@ -307,7 +307,7 @@ NEXT_PAGE_JS = r"""
 SITE_TIPS = {
     "dl.acm.org": "检索直接用 https://dl.acm.org/action/doSearch?AllField=论文标题 ；结果和文章页上的 OPEN ACCESS"
                   " 标记（可能显示为 [图标:…]）表示OA；文章页的 Pages 1 - N 就是页数；全文PDF是"
-                  " https://dl.acm.org/doi/pdf/DOI ，用 pdf 动作读（page=2 可看第2页的图注）",
+                  " https://dl.acm.org/doi/pdf/DOI ，用 pdf 动作读（page=2 可看第2页的图注）；要核对几篇论文时用 open_many 同时检索每个标题",
     "ieeexplore.ieee.org": "检索直接用 https://ieeexplore.ieee.org/search/searchresult.jsp?queryText=关键词",
     "link.springer.com": "检索直接用 https://link.springer.com/search?query=关键词 ；Open access 文章有标记",
     "sciencedirect.com": "检索直接用 https://www.sciencedirect.com/search?qs=关键词 ；Open access 文章有标记",
@@ -378,6 +378,9 @@ actions 最多3个，按顺序执行；会改变页面的动作（goto/search/cl
 {"action":"scroll","direction":"down"}               上下滑动页面：down/up 一屏，top/bottom 到顶/到底；加 "ref":12 滚到那个元素
 {"action":"next_page"}                               结果列表翻到下一页（自动找"下一页"按钮；也可以直接点页码）
 {"action":"find","text":"起草人|起草单位"}             在当前页面全文中查找关键词（多个关键词用 | 分隔）
+{"action":"open_many","urls":["https://...","https://..."],"find":"Open Access|Pages"}
+                                                     同时打开最多5个网址（后台标签页一起加载），返回每页里关键词所在的行和开头内容；
+                                                     多选题要逐个核对选项时用（比如每个选项一个检索网址），比一个个打开快得多
 {"action":"read","from":5000}                        读取当前页面第5000字之后的内容（带元素编号，页面文字被截断时用）
 {"action":"pdf","url":"(可省略=当前页)","page":2,"find":"关键词"}  读取PDF：页数、指定页（负数从末尾算，-2=倒数第二页）、或查找关键词
 {"action":"back"}                                    返回上一页
@@ -399,6 +402,7 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
 7. 常见题型：论文页数看文章页的 Pages 或 pdf 的"共N页"；"第N页有几张图/表"用 pdf page=N 看图注个数，
    没把握再加 look 看那一页；判断是否 OA 看检索结果/文章页的 Open Access 标记，多个选项要逐个核对，别凭印象。
    浏览器里打开的 PDF 你翻不了页，一律用 pdf 动作读。
+   要分别核对几个选项/几篇论文时，用 open_many 一次同时打开（每个一个检索网址），不要一个个来。
    答案常在页面后半部分（详情、表格、全文、名单）：页面文字被截断时先用 find 查题目关键词或用 read 读后面的内容，
    看全了再 answer，不要只看开头就下结论；每个选项都要在页面上找到依据。
 8. 页面文字里 [编号]<a>文字</a> 标出了可以点的元素，就在它在页面上的位置，根据周围文字判断点哪个
@@ -847,6 +851,8 @@ class Agent:
             return await self._changed(sig, "已按坐标点击")
         if kind == "find":
             return await self.find_text(str(a.get("text", "")))
+        if kind == "open_many":
+            return await self.open_many(a)
         if kind == "read":
             return await self.read_more(a.get("from"))
         if kind == "pdf":
@@ -995,6 +1001,63 @@ class Agent:
         end = min(len(text), start + self.max_text)
         more = f"；后面还有，用 read（from={end}）继续" if end < len(text) else "，已读到末尾"
         return f"页面第{start}-{end}字（共{len(text)}字{more}）：\n{text[start:end]}"
+
+    async def open_many(self, a: dict) -> str:
+        """Load several pages at once in background tabs; report what each says about the keywords."""
+        urls = [str(u).strip() for u in (a.get("urls") or []) if str(u).strip()][:5]
+        urls = [u if u.startswith(("http://", "https://")) else "https://" + u for u in urls]
+        if not urls:
+            return "open_many 需要 urls（网址列表）"
+        words = [w.strip() for w in str(a.get("find", "")).split("|") if w.strip()]
+        results = await asyncio.gather(*(self._peek(i, url, words) for i, url in enumerate(urls, 1)))
+        await self.page.bring_to_front()
+        return "\n\n".join(results)
+
+    async def _peek(self, i: int, url: str, words: list[str]) -> str:
+        page = await self._open_tab()
+        head = f"【{i}】{url}"
+        try:
+            try:
+                resp = await goto(page, url, 40000)
+            except PlaywrightTimeout:
+                resp = None
+            ctype = (resp.headers.get("content-type", "") if resp else "").lower()
+            if "pdf" in ctype or self._is_pdf_url(page.url):
+                return f"{head}\n" + await self.read_pdf({"url": page.url, "find": words[0] if words else ""})
+            try:
+                await page.wait_for_load_state("networkidle", timeout=3000)
+            except Exception:
+                pass
+            for _ in range(12):  # results that arrive after the page itself
+                try:
+                    length, loading = await page.evaluate(LOADING_JS)
+                except Exception:
+                    break
+                if length >= 200 and not loading:
+                    break
+                await asyncio.sleep(0.8)
+            if await page_blocked(page):
+                self._note_site(url, "captcha", "出现过人机验证，别连续快速打开很多页面")
+                return f"{head}\n这个页面要人机验证，没读到内容（标签页留着，可以之后再处理）"
+            snap = await asyncio.wait_for(page.evaluate(RENDER_JS, {"prefix": "", "navCap": 15}), 20)
+            text = _plain(snap["text"])
+            self._save(snap["url"], snap["title"], snap["text"])
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            out = [f"{head}\n标题：{snap['title']}"]
+            for word in words[:5]:
+                hits = [" / ".join(lines[max(0, j - 1): j + 2])[:300]
+                        for j, ln in enumerate(lines) if word.lower() in ln.lower()][:6]
+                out.append(f"“{word}”：" + ("\n  ".join(hits) if hits else "页面中没有"))
+            out.append("开头内容：" + " ".join(lines)[:900])
+            return "\n".join(out)
+        except Exception as e:
+            return f"{head}\n打开失败：{type(e).__name__}: {str(e).splitlines()[0][:120] if str(e) else ''}"
+        finally:
+            try:
+                if not await page_blocked(page):
+                    await page.close()
+            except Exception:
+                pass
 
     async def _fetch_in_page(self, url: str) -> bytes:
         """Download with the browser's own session (cookies, anti-bot checks passed)."""
@@ -1335,7 +1398,7 @@ class Agent:
                     self.log(f"  {label} {_describe(action)}")
                     try:
                         result = await self._interruptible(
-                            asyncio.wait_for(self.act(action), timeout=120 if kind == "flow" else 60))
+                            asyncio.wait_for(self.act(action), timeout=120 if kind in ("flow", "open_many") else 60))
                     except Exception as e:
                         result = f"失败：{type(e).__name__}: {str(e).splitlines()[0][:150] if str(e) else ''}"
                     if result is _INTERRUPTED:
@@ -1354,7 +1417,7 @@ class Agent:
                     break
                 if interrupted:
                     continue
-                if last_kind in ("find", "pdf", "read"):
+                if last_kind in ("find", "pdf", "read", "open_many"):
                     observation = f"（仍在 {self.page.url}）\n{steps[-1].result}"
                 else:
                     observation = await self.observe()
