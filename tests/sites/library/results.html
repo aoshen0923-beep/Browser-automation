@@ -8,6 +8,8 @@
 <div class="menu" id="topmenu"></div>
 <div id="fieldbox">检索字段：<span id="field">主题</span>
   <ul id="fl" style="display:none"><li>主题</li><li>篇名</li><li>作者</li></ul></div>
+<div class="facet"><button id="accbtn" aria-expanded="false">Access Filter</button>
+  <ul id="acc" style="display:none"><li><label><input type="checkbox"> Open access content only</label></li></ul></div>
 <div id="list"></div>
 <div class="pager"><span id="prev">上一页</span><span data-p="1">1</span><span data-p="2">2</span><span data-p="3">3</span><span id="next">下一页</span></div>
 <button id="fav">收藏</button>
@@ -34,6 +36,11 @@
   $("fieldbox").addEventListener("click", () => { $("fl").style.display = $("fl").style.display === "none" ? "block" : "none"; });
   $("fl").querySelectorAll("li").forEach((li) => li.addEventListener("click", (e) => {
     e.stopPropagation(); $("field").innerText = li.innerText; $("fl").style.display = "none"; }));
+  $("accbtn").addEventListener("click", () => {
+    const open = $("acc").style.display === "none";
+    $("acc").style.display = open ? "block" : "none";
+    $("accbtn").setAttribute("aria-expanded", String(open));
+  });
   render();
   // A cookie notice added last in the page, shown on top of everything.
   document.body.insertAdjacentHTML("beforeend", '<div role="dialog" id="notice">本站使用Cookie改善体验 <button id="agree">同意</button></div>');

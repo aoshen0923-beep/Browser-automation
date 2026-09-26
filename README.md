@@ -294,8 +294,35 @@ How it reads and works a page:
   actually read; a quote that isn't there is sent back once to verify, and
   otherwise caps the confidence at 0.6.
 
+- For multi-choice questions it keeps a checklist of the options (✓ / ✗ /
+  ? with the evidence for each), shown on the answering page as it goes; an
+  answer given while options are still unchecked is capped at 0.7.
+- `count` does the counting ("how many articles in issue 5", "how many
+  options under Access Filter") instead of the model counting by eye,
+  optionally between two headings.
+- Folded filter panels and menus are marked as folded, so it opens them
+  before judging what options they hold.
+- `open_many` checks up to five pages at once in background tabs (one per
+  option), then stays on the first so it can keep working there.
+- PDFs: read page by page (figure and table captions per page), fetched
+  from inside the site when a plain download is blocked; download buttons
+  and PDFs opened in the browser viewer are read too.
+- Built-in tips for the contest's databases (ACM, Cell, Science, Nature,
+  ScienceDirect, Wiley, Taylor & Francis, ASME, IEEE, Springer, CNKI and its
+  conference site, Wanfang, VIP, the National Library, MIT Theses, DOAJ,
+  OALIB, arXiv, ChinaXiv, medRxiv, bioRxiv, PubMed): direct search URLs and
+  where the answer-bearing labels are.
+- Pages that need a login or subscription are flagged so it looks for
+  another source instead of looping.
+
 Each step the model may chain up to three actions (for example type the
-query and click 检索), and it reads search forms inside iframes. When it answers a
+query and click 检索), and it reads search forms inside iframes.
+
+On the answering page the quick local answer and the browser research
+start together, and tabs from older questions are closed as new ones start.
+Every question leaves a run record (what the model saw, each action and
+its result, timings) in `runs/`; **导出运行记录** downloads the last three
+days as a zip for diagnosing problems. It contains no API key or cookies. When it answers a
 question with confidence 0.7 or more, the steps are saved as a recipe in
 the knowledge base; similar questions later start from that recipe, and
 recipes travel to teammates with `kb --export` / `--merge`. Every page and PDF it reads is saved to the knowledge base,

@@ -264,3 +264,48 @@ def test_take_over_stop_and_continue_buttons(std_site, chrome, tmp_path):  # noq
             assert e.code == 400
         app.loop.call_soon_threadsafe(app.loop.stop)
         t.join(10)
+
+
+def test_research_starts_without_waiting_for_the_quick_answer_and_old_tabs_close(std_site, chrome, tmp_path):  # noqa: F811
+    class Slow:
+        def chat_json(self, system, user, max_tokens=700):
+            if "网站目录" not in system:
+                time.sleep(4)  # a hard question: the quick answer thinks for a long time
+                return {"answer": "A", "confidence": 0.3}
+            if "空白页" in user:
+                return {"action": "goto", "url": std_site + "/results.html"}
+            return {"action": "answer", "answer": "C", "confidence": 0.9}
+
+    cfg = Config(root=tmp_path)
+    cfg.browser.cdp_url = chrome
+    with KB(":memory:") as kb:
+        app = App(cfg, kb, Slow(), [])
+        t = threading.Thread(target=app.serve, kwargs={"port": 0, "open_browser": False}, daemon=True)
+        t.start()
+        while not app.url:
+            time.sleep(0.1)
+        base = app.url.rstrip("/")
+        first = call(base + "/api/ask", {"question": QUESTION, "round": "team", "live": True, "budget": 60})
+        seen_browsing_first = False
+        for _ in range(100):
+            full = call(f"{base}/api/jobs/{first['id']}")
+            if full["log"] and full["quick"] is None:
+                seen_browsing_first = True
+            if full["status"] == "done":
+                break
+            time.sleep(0.1)
+        assert seen_browsing_first, "the browser waited for the quick answer"
+        assert full["final"]["answer"] == "C" and full["quick"]["answer"] == "A"
+        first_tabs = list(app.jobs[first["id"]].agent.opened)
+        for _ in range(3):
+            job = call(base + "/api/ask", {"question": QUESTION + " ", "round": "team", "live": True, "budget": 60})
+            for _ in range(100):
+                if call(f"{base}/api/jobs/{job['id']}")["status"] == "done":
+                    break
+                time.sleep(0.1)
+        # Only the last questions keep their tabs (for 继续查找); older ones are closed.
+        assert all(p.is_closed() for p in first_tabs)
+        assert call(f"{base}/api/jobs/{first['id']}")["can_continue"] is False
+        assert call(f"{base}/api/jobs/{job['id']}")["can_continue"] is True
+        app.loop.call_soon_threadsafe(app.loop.stop)
+        t.join(10)

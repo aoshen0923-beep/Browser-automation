@@ -26,6 +26,16 @@ from .solver import ROUNDS, Answer, break_even, solve, worth_answering
 LIVE_BUDGET = {"individual": 30, "team": 120}
 
 
+async def page_blocked_safe(page) -> bool:
+    """Leave verification pages open for the person; everything else can go."""
+    from .browser import page_blocked
+
+    try:
+        return await asyncio.wait_for(page_blocked(page), 3)
+    except Exception:
+        return False
+
+
 def answer_dict(q: Question, ans: Answer, round_name: str, urls: list[str] | None = None) -> dict:
     return {
         "answer": ans.answer,
@@ -67,7 +77,8 @@ class Job:
 
     @property
     def can_continue(self) -> bool:
-        return self.status == "done" and self.agent is not None and getattr(self.agent, "page", None) is not None
+        page = getattr(self.agent, "page", None)
+        return self.status == "done" and page is not None and not page.is_closed()
 
     def summary(self) -> dict:
         best = self.final or self.quick or {}
@@ -135,6 +146,24 @@ class App:
         asyncio.run_coroutine_threadsafe(self._run(job), self.loop)
         return job
 
+    @staticmethod
+    def _set_quick(job: Job, task) -> None:
+        try:
+            job.quick = answer_dict(job.q, task.result(), job.round)
+        except Exception as e:
+            job.quick = answer_dict(job.q, Answer("", 0.0, error=f"{type(e).__name__}: {e}"), job.round)
+
+    async def _prune_tabs(self, keep_jobs: int = 2) -> None:
+        """Close tabs of older finished questions (they pile up and slow the browser)."""
+        done = [j for j in sorted(self.jobs.values(), key=lambda j: j.id) if j.status == "done" and j.agent is not None]
+        for job in done[:-keep_jobs] if keep_jobs else done:
+            for page in list(getattr(job.agent, "opened", [])):
+                try:
+                    if not page.is_closed() and not await page_blocked_safe(page):
+                        await page.close()
+                except Exception:
+                    pass
+
     def job_action(self, job: Job, action: str) -> None:
         """我来操作 (pause) / 继续作答 (resume) / 停止 (stop) / 继续查找 (more)."""
         if action == "more":
@@ -170,23 +199,39 @@ class App:
             self.save_record(job)
 
     async def _run(self, job: Job) -> None:
+        from . import memory
+
         try:
-            ans = await asyncio.to_thread(solve, job.q, self.kb, self.model, self.cfg.solver.top_k)
-            job.quick = answer_dict(job.q, ans, job.round)
-            if ans.memory:
-                job.log.append("这道题以前做过，答案核实过，直接用记住的答案（不用再上网查）")
-            elif job.live and not job.control.stop:
-                if not job.paused:
-                    job.phase = "在浏览器中查找…"
-                await self._live(job)
+            known = memory.known_answer(self.kb, job.q)
+            if known or not job.live:
+                ans = await asyncio.to_thread(solve, job.q, self.kb, self.model, self.cfg.solver.top_k)
+                job.quick = answer_dict(job.q, ans, job.round)
+                if ans.memory:
+                    job.log.append("这道题以前做过，答案核实过，直接用记住的答案（不用再上网查）")
+            else:
+                # The quick answer and the browser research start together: on a hard question the
+                # model can think for a minute, and the browser shouldn't wait for it.
+                quick = asyncio.ensure_future(asyncio.to_thread(solve, job.q, self.kb, self.model, self.cfg.solver.top_k))
+                quick.add_done_callback(lambda t: self._set_quick(job, t))
+                if not job.control.stop:
+                    if not job.paused:
+                        job.phase = "在浏览器中查找…"
+                    await self._live(job)
+                if job.quick is None:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(quick), 30)
+                    except Exception:
+                        pass
         except Exception as e:  # report on the page, never kill the server
             job.error = f"{type(e).__name__}: {e}"
         finally:
+            if job.q.expected and job.feedback is None:
+                job.feedback = {"status": "learning"}  # before "done", so the page keeps polling for the grade
             job.status = "done"
             job.phase = "完成"
             job.finished = time.time()
             self.save_record(job)
-        if job.q.expected and job.feedback is None:
+        if job.q.expected and job.feedback == {"status": "learning"}:
             # A practice question pasted with its answer key grades itself.
             await self._grade(job, job.q.expected)
 
@@ -248,6 +293,7 @@ class App:
         except Exception as e:
             job.log.append(f"Chrome 未连接：{e}")
             return
+        await self._prune_tabs()
         agent = job.agent = Agent(browser, self.model, self.sites, self.kb, log=job.log.append,
                                   logged_in=self.logins.logged_in_sites(), vision=self.cfg.llm.vision != "off",
                                   control=job.control, pointer=self.cfg.browser.pointer)

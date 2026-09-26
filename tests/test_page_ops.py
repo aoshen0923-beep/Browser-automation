@@ -268,3 +268,26 @@ def test_open_many_checks_several_pages_at_once(gated, chrome):  # noqa: F811
 
     took = asyncio.run(run())
     assert took < 15, took
+
+
+def test_count_and_folded_filters(library, chrome):  # noqa: F811
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, None, [], None, log=lambda *_: None)
+            agent.page = await agent._open_tab()
+            await agent.act({"action": "goto", "url": library + "/results.html"})
+            obs = await agent.observe()
+            # A folded filter panel says so; its options only appear after the click.
+            assert re.search(r"\[\d+\]<button 已折叠-点开才能看到里面的选项>Access Filter", obs), obs
+            assert "Open access content only" not in obs
+            await agent.act({"action": "click", "ref": ref_in_line(obs, "Access Filter", "<button")})
+            obs = await agent.observe()
+            assert "已展开>Access Filter" in obs and "Open access content only" in obs
+            # Counting is done by the program, not by eye.
+            out = await agent.act({"action": "count", "text": "详情"})
+            assert "共 10 行" in out and "1. 口罩相关研究第1篇" in out
+            out = await agent.act({"action": "count", "text": "详情", "from": "第3篇", "to": "第7篇"})
+            assert "共 3 行" in out and "第4篇" in out and "第7篇" not in out.split("\n", 1)[1]
+            assert "没有“不存在”" in await agent.act({"action": "count", "text": "x", "from": "不存在"})
+
+    asyncio.run(run())

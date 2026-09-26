@@ -558,3 +558,35 @@ def test_site_tips_for_the_contest_databases():
     assert hosts("这道题和数据库无关，说的是 submit 和 cellular") == []
     assert site_tips("https://www.cell.com/cell/archive").startswith("Cell官网")
     assert site_tips("https://s.wanfangdata.com.cn/paper?q=x").startswith("万方")
+
+
+def test_option_checklist_drives_multi_choice(std_site, chrome):  # noqa: F811
+    MULTI_Q = "下列关于GB/T 38880-2020的说法正确的有（）\nA、是儿童口罩标准\nB、起草人有高尚荣\nC、有2页\nD、发布于1999年"
+    prompts = []
+
+    class Checker:
+        def chat_json(self, system, user, max_tokens=700):
+            prompts.append(user)
+            if "时间到了" in user:
+                return {"action": "answer", "answer": "ABC", "confidence": 0.9}
+            if "空白页" in user:
+                return {"options": {"A": "对：结果页写着儿童口罩技术规范", "B": "待查", "C": "待查", "D": "待查"},
+                        "actions": [{"action": "goto", "url": std_site + "/results.html"}]}
+            return {"options": {"B": "对：起草人名单里有高尚荣"}, "actions": [{"action": "find", "text": "起草人"}]}
+
+    logs = []
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, Checker(), [], None, log=logs.append)
+            return await agent.run(parse_question(MULTI_Q, "multi"), budget=60, max_steps=4, close=True)
+
+    result = asyncio.run(run())
+    assert any(line.strip() == "核实：A✓ B? C? D?" for line in logs), logs
+    assert any(line.strip() == "核实：A✓ B✓ C? D?" for line in logs)
+    later = prompts[2]
+    assert "各选项目前的核实情况" in later and "A✓ 对：结果页写着儿童口罩技术规范" in later
+    assert "还没核实的：C、D" in later
+    # Answered with options still unverified: confidence is held down and says why.
+    assert result.answer.answer == "ABC" and result.answer.confidence == 0.7
+    assert "选项 C、D 还没核实" in result.answer.reason

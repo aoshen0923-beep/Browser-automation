@@ -68,9 +68,17 @@ RENDER_JS = r"""
     return clean(el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') ||
                  el.getAttribute('alt') || (img && (img.alt || img.title)) || el.getAttribute('placeholder') || '').slice(0, 80);
   };
-  const state = el => (el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-checked') === 'true' ||
-    el.getAttribute('aria-current') && el.getAttribute('aria-current') !== 'false' ||
-    /(^|\s)(active|current|cur|on|selected)(\s|$)/i.test(el.className || '')) ? ' 当前' : '';
+  const state = el => {
+    let s = (el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-checked') === 'true' ||
+      el.getAttribute('aria-current') && el.getAttribute('aria-current') !== 'false' ||
+      /(^|\s)(active|current|cur|on|selected)(\s|$)/i.test(typeof el.className === 'string' ? el.className : '')) ? ' 当前' : '';
+    // Folded filter panels / menus: the options inside only show after a click.
+    const folded = el.getAttribute('aria-expanded') === 'false' ||
+      (el.tagName === 'SUMMARY' && el.parentElement && !el.parentElement.open);
+    if (folded) s += ' 已折叠-点开才能看到里面的选项';
+    else if (el.getAttribute('aria-expanded') === 'true') s += ' 已展开';
+    return s;
+  };
   const atom = el => {
     const tag = el.tagName.toLowerCase();
     const ref = refOf(el);
@@ -366,6 +374,20 @@ def site_tips(url: str) -> str:
     return next((tip for h, tip in SITE_TIPS.items() if host == h or host.endswith("." + h)), "")
 
 
+LOGIN_WALL = re.compile(r"请先登录|登录后(?:查看|下载|阅读|可)|需要登录|您还没有登录|Sign in to (?:view|access|read|download)|"
+                        r"Log in to (?:view|access|read)|Purchase (?:this )?(?:article|access)|Get access|Access through your institution|"
+                        r"Subscribe to (?:read|access)", re.I)
+
+
+def _mark(status: str) -> str:
+    status = status.strip()
+    if status.startswith(("对", "正确", "是", "符合")):
+        return "✓"
+    if status.startswith(("错", "不对", "不正确", "否", "不符合")):
+        return "✗"
+    return "?"
+
+
 def _plain(text: str) -> str:
     """Rendered page text without the element markers (for the knowledge base)."""
     text = re.sub(r"\[\d+(?:-\d+)?\]", "", text)
@@ -398,7 +420,10 @@ def evidence_found(evidence: str, seen: str) -> bool:
 
 
 ACTIONS = """每一步输出一个JSON对象：
-{"memory":"一两句话：已经确认了什么、下一步打算","actions":[动作1, 动作2, ...]}
+{"memory":"一两句话：已经确认了什么、下一步打算",
+ "options":{"A":"对：在哪看到的依据","B":"错：依据","C":"待查：打算怎么查","D":"待查"},
+ "actions":[动作1, 动作2, ...]}
+options 是每个选项的核实情况（判断题只写一项 "题干"），每步都更新：只有在页面上亲眼看到依据的才写 对/错，其余写 待查。
 actions 最多3个，按顺序执行；会改变页面的动作（goto/search/click/back/带回车的type）之后的动作不再执行，
 所以把"输入+点击检索"这类组合放在同一步里能省时间。可用动作：
 {"action":"goto","url":"https://..."}                 打开网址（优先用下面目录里的官方网站）
@@ -414,6 +439,9 @@ actions 最多3个，按顺序执行；会改变页面的动作（goto/search/cl
 {"action":"open_many","urls":["https://...","https://..."],"find":"Open Access|Pages"}
                                                      同时打开最多5个网址（后台标签页一起加载），返回每页里关键词所在的行和开头内容；
                                                      多选题要逐个核对选项时用（比如每个选项一个检索网址），比一个个打开快得多
+{"action":"count","text":"PDF","from":"Articles","to":"Resources"}
+                                                     数数：在整页（可限定从标题"from"到"to"之间）数含"text"的行，并列出来；
+                                                     "某期有几篇""有几个选项""结果有多少条"这类题一定用它，不要自己数
 {"action":"read","from":5000}                        读取当前页面第5000字之后的内容（带元素编号，页面文字被截断时用）
 {"action":"pdf","url":"(可省略=当前页)","page":2,"find":"关键词"}  读取PDF：页数、指定页（负数从末尾算，-2=倒数第二页）、或查找关键词
 {"action":"back"}                                    返回上一页
@@ -432,7 +460,8 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
 5. 页面需要登录或出现验证码时，程序会暂停等用户处理，你继续即可。
 6. 题库、答案分享、问答类网站（如 itihey、百度知道、百度文库、作业帮、道客巴巴）上的答案经常是错的，
    只能当线索，要到官方网站核实；只凭这类网站作答时 confidence 不要超过0.5。
-7. 常见题型：论文页数看文章页的 Pages 或 pdf 的"共N页"；"第N页有几张图/表"用 pdf page=N 看图注个数，
+7. 多选题四个选项都要各自找到依据，options 里还有"待查"就继续查，全部核实完再 answer（时间到了除外）；
+   判断题/单选题也要找到原文。常见题型：论文页数看文章页的 Pages 或 pdf 的"共N页"；"第N页有几张图/表"用 pdf page=N 看图注个数，
    没把握再加 look 看那一页；判断是否 OA 看检索结果/文章页的 Open Access 标记，多个选项要逐个核对，别凭印象。
    浏览器里打开的 PDF 你翻不了页，一律用 pdf 动作读。
    要分别核对几个选项/几篇论文时，用 open_many 一次同时打开（每个一个检索网址），不要一个个来。
@@ -578,6 +607,8 @@ class Agent:
         self._rendered = ""
         self._downloads: list[str] = []
         self._kept = None
+        self._checks: dict[str, str] = {}
+        self.opened: list[Page] = []  # tabs this agent opened (the answering page tidies old ones)  # option letter -> "对：依据" / "错：…" / "待查"
         self.trace: list[dict] = []  # everything the model saw and did, for the run record
         self._window_end = 0
         self._seen: list[str] = []
@@ -592,6 +623,7 @@ class Agent:
 
     async def _open_tab(self) -> Page:
         page = await self.browser.context.new_page()
+        self.opened.append(page)
         await self._prepare(page)
         return page
 
@@ -618,7 +650,7 @@ class Agent:
         except Exception:
             busy = True
         try:
-            await self.page.wait_for_load_state("networkidle", timeout=2500)
+            await self.page.wait_for_load_state("networkidle", timeout=2000)
         except Exception:
             busy = True  # still loading, or a page that polls forever
         await self._wait_for_content(busy=busy)
@@ -727,6 +759,9 @@ class Agent:
                 parts.append("关于这个网站以前的经验：" + "；".join(notes[-4:]))
             if site_tips(snap["url"]):
                 parts.append("这个网站的用法：" + site_tips(snap["url"]))
+        if LOGIN_WALL.search(text[:6000]):
+            parts.append("注意：这个页面提示要登录/订阅才能看全文。换一个能看到的来源（OA版本、其他数据库、文章摘要页的信息），"
+                         "或者用户已登录的网站；实在需要就在 memory 里说明，用户可以点「我来操作」去登录")
         note = f"页面文字（共{len(text)}字"
         if start:
             note += f"；从当前屏幕位置开始显示，上面还有{start}字，需要时用 read（from=0）"
@@ -890,6 +925,8 @@ class Agent:
             return await self.find_text(str(a.get("text", "")))
         if kind == "open_many":
             return await self.open_many(a)
+        if kind == "count":
+            return await self.count(a)
         if kind == "read":
             return await self.read_more(a.get("from"))
         if kind == "pdf":
@@ -1022,6 +1059,32 @@ class Agent:
                     break
             out.append(f"找到{len(hits)}处“{word}”：\n" + "\n".join(hits) if hits else f"页面中没有“{word}”")
         return "\n".join(out)
+
+    async def count(self, a: dict) -> str:
+        """Count lines mentioning a text on the whole page (optionally between two headings)."""
+        needle = str(a.get("text", "")).strip()
+        start_at, end_at = str(a.get("from", "")).strip(), str(a.get("to", "")).strip()
+        lines = [ln.strip() for ln in _plain(await self._page_text()).splitlines() if ln.strip()]
+        lines = [re.sub(r"\s+", " ", ln) for ln in lines]
+        region, note = lines, "整页"
+        if start_at:
+            i = next((j for j, ln in enumerate(lines) if start_at.lower() in ln.lower()), None)
+            if i is None:
+                return f"页面上没有“{start_at}”，没法确定从哪里开始数；换一个标题文字，或先 scroll/read 看看"
+            region = lines[i + 1:]
+            note = f"从“{start_at}”之后"
+        if end_at:
+            j = next((k for k, ln in enumerate(region) if end_at.lower() in ln.lower()), None)
+            if j is not None:
+                region = region[:j]
+                note += f"到“{end_at}”之前"
+        hits = [ln for ln in region if needle.lower() in ln.lower()] if needle else region
+        total = sum(ln.lower().count(needle.lower()) for ln in hits) if needle else len(hits)
+        listing = "\n".join(f"{n}. {ln[:120]}" for n, ln in enumerate(hits[:80], 1))
+        more = f"\n…（只列出前80行）" if len(hits) > 80 else ""
+        what = f"含“{needle}”的行" if needle else "非空行"
+        return f"{note}：{what}共 {len(hits)} 行（“{needle}”一共出现 {total} 次）：\n{listing}{more}" if needle else \
+            f"{note}：{what}共 {len(hits)} 行：\n{listing}{more}"
 
     async def read_more(self, start: object = None) -> str:
         try:
@@ -1229,6 +1292,12 @@ class Agent:
                 parts.append(f"{i}. {json.dumps(s.action, ensure_ascii=False)} → {_clip(s.result, 300)}")
         if self._memory:
             parts.append(f"\n你上一步记下的要点：{self._memory}")
+        if self._checks:
+            parts.append("\n各选项目前的核实情况（你之前记下的）：")
+            parts += [f"{k}{_mark(v)} {v}" for k, v in sorted(self._checks.items())]
+            todo = self._unchecked(q)
+            if todo and not force:
+                parts.append(f"还没核实的：{'、'.join(todo)}——先把它们查清楚再 answer。")
         if self._previous:
             parts.append(f"\n上一轮时间到时给出的答案是 {self._previous}，用户觉得还不够确定，请继续核实（找到原文依据再 answer）。")
         parts.append(f"\n当前页面：\n{observation}")
@@ -1258,6 +1327,7 @@ class Agent:
             return [{"action": "_invalid", "error": "输出必须是JSON对象"}]
         if reply.get("memory"):
             self._memory = str(reply["memory"])[:300]
+        self._update_checks(q, reply.get("options"))
         acts = reply.get("actions")
         if isinstance(acts, list):
             acts = [a for a in acts if isinstance(a, dict) and a.get("action")][:3]
@@ -1266,6 +1336,22 @@ class Agent:
         else:
             acts = []
         return acts or [{"action": "_invalid", "error": "没有给出动作，请输出 actions"}]
+
+    def _update_checks(self, q: Question, options: object) -> None:
+        if not isinstance(options, dict):
+            return
+        before = dict(self._checks)
+        for key, value in options.items():
+            key = str(key).strip().upper()[:1] if str(key).strip()[:1].upper() in q.options else str(key).strip()
+            if key in q.options or (q.kind == JUDGE and key):
+                self._checks[key] = str(value).strip()[:160]
+        if self._checks != before and self._checks:
+            self.log("  核实：" + " ".join(f"{k}{_mark(v)}" for k, v in sorted(self._checks.items())))
+
+    def _unchecked(self, q: Question) -> list[str]:
+        if q.kind == JUDGE or not self._checks:
+            return []
+        return [k for k in q.options if not _mark(self._checks.get(k, "待查")) in ("✓", "✗")]
 
     def _load_recipes(self, q: Question) -> None:
         self._recipes = []
@@ -1391,6 +1477,7 @@ class Agent:
             self._memory = ""
             self._previous = ""
             self._seen = []
+            self._checks = {}
             self._load_recipes(q)
             if self._recipes:
                 self.log(f"  (found {len(self._recipes)} saved approach(es) for similar questions)")
@@ -1481,7 +1568,7 @@ class Agent:
                     break
                 if interrupted:
                     continue
-                if last_kind in ("find", "pdf", "read", "open_many"):
+                if last_kind in ("find", "pdf", "read", "open_many", "count"):
                     observation = f"（仍在 {self.page.url}）\n{steps[-1].result}"
                 else:
                     observation = await self.observe()
@@ -1509,6 +1596,10 @@ class Agent:
         if final.get("evidence"):
             reason += f"  证据：{str(final['evidence'])[:200]}"
         final_url = self.page.url if self.page is not None and not self.page.is_closed() else ""
+        todo = self._unchecked(q) if answer and q.kind == MULTI else []
+        if todo:
+            conf = min(conf, 0.7)
+            reason = f"（选项 {'、'.join(todo)} 还没核实）" + reason
         if answer and final.get("evidence") and not self._evidence_ok(final, steps):
             conf = min(conf, 0.6)
             reason = "（给出的证据没在看过的页面原文中找到，可能不准）" + reason
