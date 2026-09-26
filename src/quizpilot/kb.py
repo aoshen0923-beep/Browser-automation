@@ -140,6 +140,14 @@ class KB:
             self._delete_source(source)
 
     @_locked
+    def get_text(self, source: str) -> str | None:
+        """The stored text of one short document (notes, remembered answers)."""
+        row = self.db.execute("SELECT id FROM docs WHERE source=?", (source,)).fetchone()
+        if not row:
+            return None
+        return "\n".join(r[0] for r in self.db.execute("SELECT text FROM chunks WHERE doc_id=? ORDER BY id", (row[0],)))
+
+    @_locked
     def search(self, text: str, k: int = 8, module: str | None = None, kind: str | None = None) -> list[Hit]:
         query = fts_query(text)
         if not query:
@@ -173,12 +181,15 @@ class KB:
     def overview(self) -> dict:
         kinds = dict(self.db.execute("SELECT kind, COUNT(*) FROM docs GROUP BY kind").fetchall())
         modules = dict(self.db.execute(
-            "SELECT module, COUNT(*) FROM docs WHERE module NOT IN ('', 'live', 'recipe', 'flow') GROUP BY module"
+            "SELECT module, COUNT(*) FROM docs WHERE module NOT IN ('', 'live', 'recipe', 'flow', 'memory') GROUP BY module"
         ).fetchall())
         return {
             **self.stats(),
             "flows": self.db.execute("SELECT COUNT(*) FROM flows").fetchone()[0],
             "recipes": kinds.get("recipe", 0),
+            "answers": kinds.get("qa", 0),
+            "lessons": kinds.get("lesson", 0),
+            "sitenotes": kinds.get("sitenote", 0),
             "pages": kinds.get("page", 0) + kinds.get("live", 0),
             "captures": kinds.get("capture", 0),
             "files": kinds.get("pdf", 0) + kinds.get("html", 0) + kinds.get("text", 0),

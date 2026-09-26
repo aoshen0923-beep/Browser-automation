@@ -57,6 +57,7 @@ class Job:
     error: str = ""
     started: float = field(default_factory=time.time)
     finished: float | None = None
+    feedback: dict | None = None  # after grading: {"right", "correct", "note"} or {"status": "learning"}
     control: object = None  # agent.Control while live research can be paused/stopped
     agent: object = None  # kept after research so 继续查找 can pick up where it stopped
 
@@ -94,6 +95,8 @@ class Job:
             "controls": self.status == "running" and self.control is not None,
             "paused": self.paused,
             "can_continue": self.can_continue,
+            "feedback": self.feedback,
+            "expected": self.q.expected,
         }
 
 
@@ -169,7 +172,9 @@ class App:
         try:
             ans = await asyncio.to_thread(solve, job.q, self.kb, self.model, self.cfg.solver.top_k)
             job.quick = answer_dict(job.q, ans, job.round)
-            if job.live and not job.control.stop:
+            if ans.memory:
+                job.log.append("这道题以前做过，答案核实过，直接用记住的答案（不用再上网查）")
+            elif job.live and not job.control.stop:
                 if not job.paused:
                     job.phase = "在浏览器中查找…"
                 await self._live(job)
@@ -179,6 +184,32 @@ class App:
             job.status = "done"
             job.phase = "完成"
             job.finished = time.time()
+        if job.q.expected and job.feedback is None:
+            # A practice question pasted with its answer key grades itself.
+            await self._grade(job, job.q.expected)
+
+    def grade(self, job: Job, correct: str) -> None:
+        """答对了 / 答错了: remember the answer, the approach or the lesson."""
+        if job.status != "done":
+            raise ValueError("等这道题答完再标记对错")
+        if not str(correct).strip():
+            raise ValueError("请填正确答案")
+        job.feedback = {"status": "learning"}
+        asyncio.run_coroutine_threadsafe(self._grade(job, str(correct)), self.loop)
+
+    async def _grade(self, job: Job, correct: str) -> None:
+        from . import memory
+
+        best = job.final or job.quick or {}
+        given = best.get("answer", "")
+        agent = job.agent
+        steps = list(getattr(agent, "_steps", []) or []) if job.final else []
+        final = {"evidence": best.get("reason", "")}
+        job.feedback = {"status": "learning"}
+        try:
+            job.feedback = await asyncio.to_thread(memory.learn, self.kb, self.model, job.q, given, correct, steps, final)
+        except Exception as e:
+            job.feedback = {"error": str(e)}
 
     async def _live(self, job: Job) -> None:
         from .agent import Agent
@@ -413,9 +444,12 @@ class App:
                         action = parts[3]
                     except (ValueError, KeyError, IndexError):
                         return self._json({"error": "not found"}, 404)
-                    if action not in ("pause", "resume", "stop", "more"):
+                    if action not in ("pause", "resume", "stop", "more", "grade"):
                         return self._json({"error": "not found"}, 404)
                     try:
+                        if action == "grade":
+                            app.grade(job, str(self._body().get("correct", "")))
+                            return self._json(job.full())
                         app.job_action(job, action)
                     except Exception as e:
                         return self._json({"error": str(e)}, 400)

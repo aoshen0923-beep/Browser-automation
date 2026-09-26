@@ -24,6 +24,7 @@ from . import pdftools
 from .browser import BLOCKED_RESOURCES, Browser, goto, page_blocked, wait_for_human
 from .kb import KB
 from .llm import ChatModel, LLMError, VisionUnsupported
+from . import memory
 from .pointer import Pointer
 from .question import JUDGE, MULTI, SINGLE, Question
 from .solver import Answer, normalize_answer
@@ -474,6 +475,9 @@ class Agent:
         self._frames: dict[int, object] = {}
         self._memory = ""
         self._recipes: list[str] = []
+        self._lessons: list[str] = []
+        self._known = ""
+        self._noted_hosts: set[str] = set()
         self._flows: list = []
         self._saved: set[str] = set()
         self._prepared: set = set()
@@ -521,6 +525,7 @@ class Agent:
             busy = True  # still loading, or a page that polls forever
         await self._wait_for_content(busy=busy)
         if await page_blocked(self.page):
+            self._note_site(self.page.url, "captcha", "出现过人机验证，别连续快速打开很多页面")
             t0 = time.monotonic()
             await self.page.unroute("**/*")  # the CAPTCHA picture must load
             self._prepared.discard(self.page)
@@ -612,6 +617,12 @@ class Agent:
         screens = max(1, -(-sc["h"] // max(1, sc["v"])))
         at = min(screens, int(sc["y"] // max(1, sc["v"])) + 1)
         parts = [f"标题：{snap['title']}\n网址：{snap['url']}\n滚动位置：第{at}屏/共{screens}屏"]
+        host = memory._host(snap["url"])
+        if host and host not in self._noted_hosts:
+            self._noted_hosts.add(host)
+            notes = memory.site_notes(self.kb, host)
+            if notes:
+                parts.append("关于这个网站以前的经验：" + "；".join(notes[-4:]))
         note = f"页面文字（共{len(text)}字"
         if start:
             note += f"；从当前屏幕位置开始显示，上面还有{start}字，需要时用 read（from=0）"
@@ -667,6 +678,7 @@ class Agent:
             try:
                 resp = await goto(page, url, 40000)
             except PlaywrightTimeout:
+                self._note_site(url, "slow", "打开很慢（40秒还没加载完），时间紧时优先用别的网站")
                 await self._wait_for_content(5)
                 return "页面加载很慢（40秒还没完全打开），先看已经显示出来的部分；是空白就换一个网站"
             ctype = (resp.headers.get("content-type", "") if resp else "").lower()
@@ -961,12 +973,22 @@ class Agent:
         hints = suggest_sites(q.stem + " " + " ".join(q.options.values()), self.sites)
         if hints:
             parts.append("\n根据题目，最可能用到的官方网站（优先直接 goto 这些网址，不要先用搜索引擎）：")
-            parts += [f"- 模块{s['module']} {s['title']}：{' '.join(s['urls'][:6])}" for s in hints]
+            for s in hints:
+                parts.append(f"- 模块{s['module']} {s['title']}：{' '.join(s['urls'][:6])}")
+                for url in s["urls"][:3]:
+                    notes = memory.site_notes(self.kb, url)
+                    if notes:
+                        parts.append(f"  （{memory._host(url)} 以前的经验：{'；'.join(notes[-3:])}）")
         if self._flows:
             parts.append("\n已录制的操作流程（一个动作就能自动完成多步操作，适合时优先用，比一步步点击快得多）：")
             for f in self._flows:
                 example = {p["name"]: p["example"] for p in f.params}
                 parts.append(f"- {f.summary()}\n  用法：{json.dumps({'action': 'flow', 'name': f.name, 'params': example}, ensure_ascii=False)}（把参数换成本题的值）")
+        if self._known:
+            parts.append(f"\n这道题以前做过并核实过：正确答案是 {self._known}。如果题目完全一样，直接 answer。")
+        if self._lessons:
+            parts.append("\n以前做错过的相似题的教训（别再犯同样的错）：")
+            parts += [_clip(x, 500) for x in self._lessons]
         if self._recipes:
             parts.append("\n以前答对过的相似题的做法（可以照着做，网址和步骤可直接复用）：")
             parts += [_clip(r, 700) for r in self._recipes]
@@ -1012,8 +1034,16 @@ class Agent:
     def _load_recipes(self, q: Question) -> None:
         self._recipes = []
         self._flows = []
+        self._lessons = []
+        self._known = ""
+        self._noted_hosts = set()
         if self.kb is None:
             return
+        self._lessons = memory.lessons_for(self.kb, q.stem + " " + " ".join(q.options.values()))
+        try:
+            self._known = memory.known_answer(self.kb, q)
+        except Exception:
+            self._known = ""
         try:
             self._flows = self.kb.find_flows(q.stem + " " + " ".join(q.options.values()))
         except Exception:
@@ -1025,19 +1055,17 @@ class Agent:
         self._recipes = [h.text for h in hits if h.score > 5]
 
     def _save_recipe(self, q: Question, steps: list[Step], final: dict, conf: float) -> None:
-        """Remember how a confidently answered question was solved."""
-        useful = [s for s in steps if s.action.get("action") not in ("（无效输出）",) and not s.result.startswith(("失败", "重复操作"))]
-        if self.kb is None or conf < 0.7 or not useful:
+        """Remember how a confidently answered question was solved (verified later by grading)."""
+        if self.kb is None or conf < 0.7:
             return
-        lines = [f"题目：{q.stem}"]
-        for i, s in enumerate(useful, 1):
-            a = {k: v for k, v in s.action.items() if k != "ref"}
-            lines.append(f"{i}. {json.dumps(a, ensure_ascii=False)}")
-        if final.get("evidence"):
-            lines.append(f"依据：{str(final['evidence'])[:200]}")
-        source = "recipe:" + hashlib.sha1(q.stem.encode("utf-8")).hexdigest()[:16]
         try:
-            self.kb.add_document(source, [(None, "\n".join(lines))], title=f"做法：{q.stem[:40]}", kind="recipe", module="recipe")
+            memory.save_recipe(self.kb, q, steps, final)
+        except Exception:
+            pass
+
+    def _note_site(self, url: str, key: str, note: str) -> None:
+        try:
+            memory.add_site_note(self.kb, url, key, note)
         except Exception:
             pass
 
@@ -1202,6 +1230,9 @@ class Agent:
                         break
                     steps.append(Step(action, result))
                     self._remember(result)
+                    if kind == "goto" and result.startswith("失败") and "ERR_" in result:
+                        err = re.search(r"ERR_[A-Z_]+", result).group(0)
+                        self._note_site(str(action.get("url", "")), "fail", f"打开失败（{err}），可能要校园网/登录，或网站不稳定")
                     last_kind = kind
                     if result.startswith("失败") or kind in PAGE_CHANGING or (kind == "type" and action.get("enter")):
                         break  # element numbers are stale now; look at the page again

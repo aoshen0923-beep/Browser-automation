@@ -51,6 +51,7 @@ class Answer:
     citations: list[Hit] = field(default_factory=list)
     seconds: float = 0.0
     error: str = ""
+    memory: bool = False  # answered from a graded question seen before
 
 
 def build_prompt(q: Question, hits: list[Hit]) -> str:
@@ -76,6 +77,12 @@ def normalize_answer(q: Question, raw: object) -> str:
 
 def solve(q: Question, kb: KB, model: ChatModel, top_k: int = 8) -> Answer:
     start = time.monotonic()
+    from .memory import known_answer
+
+    known = known_answer(kb, q)
+    if known:
+        return Answer(known, 0.99, reason="这道题以前做过，答案已经核实过（记在知识库里）",
+                      seconds=time.monotonic() - start, memory=True)
     query = q.stem + " " + " ".join(q.options.values())
     hits = kb.search(query, k=top_k)
     try:

@@ -411,7 +411,7 @@ def cmd_eval(args, cfg: Config) -> int:
     gain, loss = ROUNDS[args.round]
     stats = {"correct": 0, "answered": 0, "score": 0.0, "seconds": []}
 
-    def record(i, q, ans) -> None:
+    def record(i, q, ans, kb=None, steps=None) -> None:
         stats["seconds"].append(ans.seconds)
         ok = ans.answer == q.expected
         stats["correct"] += ok
@@ -425,12 +425,19 @@ def cmd_eval(args, cfg: Config) -> int:
             f"conf {ans.confidence:.2f} {ans.seconds:4.1f}s  {q.stem[:36]}{note}",
             flush=True,
         )
+        if args.learn and kb is not None and not ans.memory:
+            from .memory import learn
+
+            try:
+                print(f"      {learn(kb, model, q, ans.answer, q.expected, steps or [])['note'][:100]}", flush=True)
+            except Exception as e:
+                print(f"      (couldn't record: {e})", flush=True)
 
     async def run() -> None:
         with _open_kb(cfg) as kb:
             if not args.live:
                 for i, q in enumerate(questions, 1):
-                    record(i, q, await asyncio.to_thread(solve, q, kb, model, cfg.solver.top_k))
+                    record(i, q, await asyncio.to_thread(solve, q, kb, model, cfg.solver.top_k), kb)
                 return
             from .agent import Agent
 
@@ -439,7 +446,7 @@ def cmd_eval(args, cfg: Config) -> int:
                     print(f"--- {i}/{len(questions)} [{q.module}] {q.stem[:50]}", flush=True)
                     agent = Agent(browser, model, load_sites(), kb, vision=cfg.llm.vision != "off", pointer=cfg.browser.pointer)
                     result = await agent.run(q, budget=_budget(args), close=True)
-                    record(i, q, result.answer)
+                    record(i, q, result.answer, kb, result.steps)
 
     asyncio.run(run())
     n = len(stats["seconds"])
@@ -546,6 +553,8 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             s.add_argument("file")
             s.add_argument("--modules", help="only these modules, e.g. 11,12,24")
+            s.add_argument("--learn", action="store_true",
+                           help="remember each answer, keep approaches that were right, and write lessons from wrong ones")
             s.add_argument("--limit", type=int, help="only the first N questions")
         s.set_defaults(fn=fn)
 

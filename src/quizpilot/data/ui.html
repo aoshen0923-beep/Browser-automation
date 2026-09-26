@@ -78,7 +78,7 @@ label.file input { display: none; }
 .site .url { flex: 1; min-width: 160px; font-size: 13px; }
 .site button { padding: 4px 10px; font-size: 13px; }
 header { flex-wrap: wrap; }
-.ctl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
 .ctl:empty { display: none; }
 .paused { background: var(--code); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 12px;
   margin-bottom: 10px; }
@@ -356,21 +356,38 @@ async function refresh(id) {
   } else if (j.controls) {
     ctl = `<button data-act="pause" title="AI 暂停，你自己在浏览器里操作，好了再让它接着找">我来操作</button>
            <button data-act="stop" title="不再查找，用已经看到的内容立刻给出答案">停止，马上作答</button>`;
-  } else if (j.can_continue) {
-    ctl = `<button data-act="more" title="从浏览器当前页面接着找">继续查找（再查 ${Math.round(j.budget)} 秒）</button>`;
+  } else if (j.status === "done") {
+    const best = j.final || j.quick || {};
+    if (j.can_continue) ctl += `<button data-act="more" title="从浏览器当前页面接着找">继续查找（再查 ${Math.round(j.budget)} 秒）</button>`;
+    const fb = j.feedback;
+    const ask = `<span class="muted">这题对吗？标记后它会记住：</span>
+      ${best.answer ? `<button data-act="right" data-answer="${esc(best.answer)}" title="记住这道题的答案和做法">✓ 答对了</button>` : ""}
+      <button data-act="wrong" title="填正确答案，它会复盘错在哪里并记下教训">✗ 答错了…</button>`;
+    if (!fb) ctl += ask;
+    else if (fb.status === "learning") ctl += `<span class="muted"><span class="spinner"></span> 正在复盘、记下来…</span>`;
+    else if (fb.error) ctl += `<span class="err">${esc(fb.error)}</span>` + ask;
+    else ctl += `<span class="badge ${fb.right ? "good" : "bad"}">${fb.right ? "✓ 答对了" : `✗ 答错了，正确答案 ${esc(fb.correct)}`}</span>
+      <span class="muted">${esc(fb.note)}</span>`;
   }
   const box = el.querySelector(".ctl");
   if (box.dataset.html !== ctl) { box.innerHTML = ctl; box.dataset.html = ctl; }
-  if (j.status === "done") running.delete(id);
+  if (j.status === "done" && !(j.feedback && j.feedback.status === "learning")) running.delete(id);
 }
 
 $("jobs").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-act]");
   if (!b) return;
   const id = Number(b.closest(".job").dataset.id);
+  let act = b.dataset.act, body = {};
+  if (act === "right") { act = "grade"; body = {correct: b.dataset.answer}; }
+  if (act === "wrong") {
+    const correct = prompt("正确答案是？（单选填 C，多选填 ABD，判断题填 对 或 错）");
+    if (!correct || !correct.trim()) return;
+    act = "grade"; body = {correct: correct.trim()};
+  }
   b.disabled = true;
   try {
-    await api(`/api/jobs/${id}/${b.dataset.act}`, {});
+    await api(`/api/jobs/${id}/${act}`, body);
     running.add(id);
     refresh(id);
   } catch (err) {
@@ -546,7 +563,7 @@ function fileBase64(file) {
 async function loadKb() {
   let k;
   try { k = await (await fetch("/api/kb")).json(); } catch (e) { return; }
-  $("kb-stats").textContent = `共 ${k.docs} 份资料：网页 ${k.pages} · 保存的页面 ${k.captures} · 文件 ${k.files} · 操作流程 ${k.flows} · 记住的做法 ${k.recipes}`;
+  $("kb-stats").textContent = `共 ${k.docs} 份资料：网页 ${k.pages} · 保存的页面 ${k.captures} · 文件 ${k.files} · 操作流程 ${k.flows} · 记住的做法 ${k.recipes} · 做过的题 ${k.answers} · 教训 ${k.lessons} · 网站经验 ${k.sitenotes}`;
   if (!kbLoaded) {
     // "01".."09" aren't numeric keys to JS, so objects put them after "10": sort explicitly.
     const titles = Object.entries(k.module_titles).sort((a, b) => a[0].localeCompare(b[0]));

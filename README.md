@@ -182,7 +182,25 @@ While it researches, each question has buttons:
   current page, remembering what it already found.
 
 Time spent paused or on a verification page doesn't count against the
-time limit. Several questions can run at once, which suits the team round.
+time limit.
+
+When a question is finished, mark it **✓ 答对了** or **✗ 答错了…** (enter the
+right answer). quizpilot learns from it:
+
+- The question and its right answer are remembered. The same question
+  later (even with shuffled options) is answered at once, without browsing.
+- If it was right, the research steps are kept as a verified approach
+  that similar questions start from.
+- If it was wrong, the model reviews its steps against the right answer and
+  writes a short lesson (教训). Similar questions are shown the lesson, and
+  the approach that led to the wrong answer is dropped.
+- Sites that fail to open, load very slowly or show verification pages
+  get a note the agent sees before going there again.
+
+A practice question pasted with `正确答案：X` grades itself. From a terminal,
+`quizpilot eval practice.txt --live --learn` does the same for a whole
+practice file. Everything learned is in the knowledge base, so teammates
+get it through export / merge. Several questions can run at once, which suits the team round.
 From a terminal the same page is `quizpilot ui`.
 
 The **网站登录** tab lists the contest sites (grouped like the bookmarks
