@@ -537,3 +537,24 @@ def test_stop_answers_at_once_and_continue_resumes(std_site, chrome):  # noqa: F
     assert "上一轮时间到时给出的答案是 B" in model.prompts[-1]
     assert "results.html" in model.prompts[-1]
     assert second.steps[0].action["action"] == "goto"  # earlier steps are kept
+
+
+def test_site_tips_for_the_contest_databases():
+    from quizpilot.agent import site_tips, tips_for_question
+
+    def hosts(q):
+        return [t.split("：")[0] for t in tips_for_question(q)]
+
+    assert hosts("被称为四大名刊之一的《Cell》，在官网中可以检索") == ["cell.com"]
+    assert hosts("在ScienceDirect数据库中检索") == ["sciencedirect.com"]
+    assert hosts("Science期刊论文的检索与获取") == ["science.org"]
+    assert hosts("nature期刊论文的检索与获取") == ["nature.com"]
+    assert hosts("预印本系统：ChinaXiv") == ["chinaxiv.org"]
+    assert hosts("预印本系统：arXiv") == ["arxiv.org"]
+    assert hosts("预印本系统：medRxiv & bioRxiv") == ["medrxiv.org", "biorxiv.org"]
+    assert hosts("MIT Theses 学位论文") == ["dspace.mit.edu"]
+    assert hosts("维普的期刊论文检索") == ["cqvip.com"]
+    assert hosts("Taylor & Francis期刊数据库") == ["tandfonline.com"]
+    assert hosts("这道题和数据库无关，说的是 submit 和 cellular") == []
+    assert site_tips("https://www.cell.com/cell/archive").startswith("Cell官网")
+    assert site_tips("https://s.wanfangdata.com.cn/paper?q=x").startswith("万方")

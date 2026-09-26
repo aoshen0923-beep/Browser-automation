@@ -308,23 +308,56 @@ SITE_TIPS = {
     "dl.acm.org": "检索直接用 https://dl.acm.org/action/doSearch?AllField=论文标题 ；结果和文章页上的 OPEN ACCESS"
                   " 标记（可能显示为 [图标:…]）表示OA；文章页的 Pages 1 - N 就是页数；全文PDF是"
                   " https://dl.acm.org/doi/pdf/DOI ，用 pdf 动作读（page=2 可看第2页的图注）；要核对几篇论文时用 open_many 同时检索每个标题",
-    "ieeexplore.ieee.org": "检索直接用 https://ieeexplore.ieee.org/search/searchresult.jsp?queryText=关键词",
-    "link.springer.com": "检索直接用 https://link.springer.com/search?query=关键词 ；Open access 文章有标记",
-    "sciencedirect.com": "检索直接用 https://www.sciencedirect.com/search?qs=关键词 ；Open access 文章有标记",
-    "arxiv.org": "摘要页 https://arxiv.org/abs/编号 ，PDF https://arxiv.org/pdf/编号 （用 pdf 动作读）",
+    "cell.com": "Cell官网：首页右上角 Search 是 Quick Search（可选检索字段），旁边有 Advanced Search（有 Access Filter 等筛选项，"
+                "要点开看有几个选项）；过刊在 https://www.cell.com/cell/archive 按年份/卷/期浏览，每期目录按文献类型分组"
+                "（Articles 等），数篇数要打开那一期逐组数；文章页写着页码范围（如 p1777–1792.e21）和 PDF 链接",
+    "science.org": "检索直接用 https://www.science.org/action/doSearch?AllField=关键词 ；过刊目录 https://www.science.org/loi/science ，"
+                   "某卷某期 https://www.science.org/toc/science/卷/期 ；文章页有 PDF 链接",
+    "sciencedirect.com": "检索直接用 https://www.sciencedirect.com/search?qs=关键词 ；Open access 文章有标记；期刊页可按卷期浏览",
+    "wanfangdata.com.cn": "万方检索直接用 https://s.wanfangdata.com.cn/paper?q=关键词 （期刊论文 /periodical?q= ，学位论文 /thesis?q= ，"
+                          "会议论文 /conference?q= ）；结果页左侧可按年份、资源类型等筛选，检索式可在高级检索里写",
+    "cqvip.com": "维普：用首页或期刊检索页的检索框（可选题名、关键词、作者等字段），高级检索里可组合条件；结果页有被引、下载等信息",
+    "tandfonline.com": "Taylor & Francis 检索直接用 https://www.tandfonline.com/action/doSearch?AllField=关键词 ；"
+                       "Open access 文章有标记；文章页有 PDF 链接",
+    "cnki.net": "知网：高级检索在 https://kns.cnki.net/kns8s/AdvSearch （主题/篇名/作者等字段是下拉框，可用 click 文字选择）；"
+                "复杂检索优先用录制好的流程；结果页有被引、下载次数，详情页有基金、分类号等",
+    "nature.com": "检索直接用 https://www.nature.com/search?q=关键词&journal=nature （去掉 journal 参数搜全部 Nature 期刊）；"
+                  "文章页有 Open access 标记；PDF 通常是文章网址加 .pdf",
+    "onlinelibrary.wiley.com": "Wiley 检索直接用 https://onlinelibrary.wiley.com/action/doSearch?AllField=关键词 ；Open Access 有标记",
+    "asmedigitalcollection.asme.org": "ASME 检索直接用 https://asmedigitalcollection.asme.org/search-results?q=关键词 ；"
+                                      "结果可按期刊/会议论文集筛选",
+    "ieeexplore.ieee.org": "检索直接用 https://ieeexplore.ieee.org/search/searchresult.jsp?queryText=关键词 ；"
+                           "会议论文集在结果左侧 Conferences 筛选；会议信息也可查 https://conferences.ieee.org",
+    "conf.cnki.net": "CNKI 中国学术会议网：会议预告、会议信息检索，用页面上的检索框按会议名称/主办单位查",
+    "nlc.cn": "国家图书馆：馆藏目录检索 http://opac.nlc.cn ；博士论文在国图的学位论文资源里检索，详情页有学位授予单位、年份等",
+    "dspace.mit.edu": "MIT Theses：检索直接用 https://dspace.mit.edu/discover?query=关键词 ，可按院系、年份、学位筛选",
+    "doaj.org": "DOAJ：首页检索框可选 Journals（期刊）或 Articles（文章）；期刊详情有 APC、许可协议、出版方等",
+    "arxiv.org": "检索直接用 https://arxiv.org/search/?query=关键词&searchtype=all ；摘要页 https://arxiv.org/abs/编号 ，"
+                 "PDF https://arxiv.org/pdf/编号 （用 pdf 动作读），摘要页有提交历史 v1/v2",
+    "oalib.com": "OALIB：首页检索框检索，结果为开放获取论文，可直接下载 PDF",
+    "chinaxiv.org": "ChinaXiv：首页检索框检索中文预印本，详情页有版本、学科分类、提交时间",
+    "medrxiv.org": "检索直接用 https://www.medrxiv.org/search/关键词 ；详情页有版本、发布日期和 PDF",
+    "biorxiv.org": "检索直接用 https://www.biorxiv.org/search/关键词 ；详情页有版本、发布日期和 PDF",
     "pubmed.ncbi.nlm.nih.gov": "检索直接用 https://pubmed.ncbi.nlm.nih.gov/?term=关键词",
-    "onlinelibrary.wiley.com": "检索直接用 https://onlinelibrary.wiley.com/action/doSearch?AllField=关键词",
+    "link.springer.com": "检索直接用 https://link.springer.com/search?query=关键词 ；Open access 文章有标记",
 }
 
-
-TIP_NAMES = {"acm": "dl.acm.org", "ieee": "ieeexplore.ieee.org", "springer": "link.springer.com",
-             "sciencedirect": "sciencedirect.com", "elsevier": "sciencedirect.com", "arxiv": "arxiv.org",
-             "pubmed": "pubmed.ncbi.nlm.nih.gov", "wiley": "onlinelibrary.wiley.com"}
+# Names in a question → the site whose tips apply ("science" is checked after ScienceDirect).
+TIP_NAMES = [
+    (r"acm", "dl.acm.org"), (r"(?<![a-z])cell(?![a-z])", "cell.com"), (r"sciencedirect|elsevier", "sciencedirect.com"),
+    (r"(?<![a-z])science(?![a-z])(?!\s*direct)", "science.org"), (r"万方|wanfang", "wanfangdata.com.cn"),
+    (r"维普|cqvip", "cqvip.com"), (r"taylor|tandf", "tandfonline.com"), (r"知网|cnki", "cnki.net"),
+    (r"学术会议网", "conf.cnki.net"), (r"(?<![a-z])nature(?![a-z])", "nature.com"), (r"wiley", "onlinelibrary.wiley.com"),
+    (r"asme", "asmedigitalcollection.asme.org"), (r"ieee", "ieeexplore.ieee.org"), (r"国家图书馆|国图", "nlc.cn"),
+    (r"(?<![a-z])mit(?![a-z])", "dspace.mit.edu"), (r"doaj", "doaj.org"), (r"(?<!china)arxiv", "arxiv.org"),
+    (r"oalib", "oalib.com"), (r"chinaxiv", "chinaxiv.org"), (r"medrxiv", "medrxiv.org"), (r"biorxiv", "biorxiv.org"),
+    (r"pubmed", "pubmed.ncbi.nlm.nih.gov"), (r"springer", "link.springer.com"),
+]
 
 
 def tips_for_question(text: str) -> list[str]:
     low = text.lower()
-    hosts = dict.fromkeys(h for name, h in TIP_NAMES.items() if name in low)
+    hosts = dict.fromkeys(h for pat, h in TIP_NAMES if re.search(pat, low))
     return [f"{h}：{SITE_TIPS[h]}" for h in hosts]
 
 
