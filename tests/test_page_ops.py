@@ -146,3 +146,38 @@ def test_made_up_evidence_is_sent_back_once(std_site, chrome):  # noqa: F811
     result = asyncio.run(run(12))
     assert result.answer.answer == "A" and result.answer.confidence == 0.6
     assert "证据没在看过的页面原文中找到" in result.answer.reason
+
+
+def test_pointer_shows_where_the_agent_clicks(library, chrome):  # noqa: F811
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, None, [], None, log=lambda *_: None)
+            agent.page = await agent._open_tab()
+            await agent.act({"action": "goto", "url": library + "/results.html"})
+            obs = await agent.observe()
+            ref = ref_in_line(obs, "同意", "<button>同意")
+            box = await agent._element(ref).bounding_box()
+            await agent.act({"action": "click", "ref": ref})
+            where = await agent.page.evaluate(
+                "() => document.getElementById('__qp_pointer').firstChild.getBoundingClientRect().toJSON()")
+            # The arrow's tip sits on the middle of the button it clicked.
+            assert abs(where["x"] + 3 - (box["x"] + box["width"] / 2)) < 2
+            assert abs(where["y"] + 2 - (box["y"] + box["height"] / 2)) < 2
+            # It isn't part of what the model reads, and the click still went through.
+            obs = await agent.observe()
+            assert "__qp_pointer" not in obs and "对话框" not in obs
+            # Hidden while a screenshot is taken for the model.
+            async with agent.pointer.hidden(agent.page):
+                shown = await agent.page.evaluate("() => document.getElementById('__qp_pointer').style.display")
+            assert shown == "none"
+            # It follows to the next page, starting from where it was.
+            detail = ref_in_line(obs, "口罩相关研究第2篇", "<a>详情")
+            await agent.act({"action": "click", "ref": detail})
+            await agent.act({"action": "scroll", "direction": "down"})
+            off = Agent(browser, None, [], None, log=lambda *_: None, pointer=False)
+            off.page = agent.page
+            await off.act({"action": "goto", "url": library + "/results.html?plain"})
+            await off.act({"action": "next_page"})
+            assert await off.page.evaluate("() => !document.getElementById('__qp_pointer')")
+
+    asyncio.run(run())

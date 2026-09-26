@@ -24,6 +24,7 @@ from . import pdftools
 from .browser import BLOCKED_RESOURCES, Browser, goto, page_blocked, wait_for_human
 from .kb import KB
 from .llm import ChatModel, LLMError, VisionUnsupported
+from .pointer import Pointer
 from .question import JUDGE, MULTI, SINGLE, Question
 from .solver import Answer, normalize_answer
 
@@ -121,7 +122,7 @@ RENDER_JS = r"""
     }
     if (node.nodeType !== 1) return;
     const el = node;
-    if (SKIP.has(el.tagName) || skipDialogs.has(el)) return;
+    if (SKIP.has(el.tagName) || skipDialogs.has(el) || el.id === '__qp_pointer') return;
     if (!shown(el)) return;
     const block = BLOCK.has(el.tagName);
     const hard = el.matches(INTERACTIVE) || typeof el.onclick === 'function';
@@ -452,6 +453,7 @@ class Agent:
         logged_in: list[dict] | None = None,
         vision: bool = True,
         control: Control | None = None,
+        pointer: bool = True,
     ):
         self.browser = browser
         self.model = model
@@ -483,6 +485,7 @@ class Agent:
         self._paused_for = 0.0
         self._previous = ""
         self.control = control
+        self.pointer = Pointer(pointer)
 
     # --- page handling -------------------------------------------------------------
 
@@ -682,6 +685,7 @@ class Agent:
             el = self._element(a.get("ref")) if a.get("ref") not in (None, "") else await self._by_text(str(a.get("text", "")))
             href = await el.get_attribute("href", timeout=5000)
             sig = await self._signature()
+            await self.pointer.to_element(page, el)
             try:
                 await el.click(timeout=5000)
             except Exception:
@@ -694,6 +698,7 @@ class Agent:
             return await self._changed(sig, "已点击")
         if kind == "hover":
             el = self._element(a.get("ref"))
+            await self.pointer.to_element(page, el, click=False)
             await el.hover(timeout=5000)
             await asyncio.sleep(0.8)
             return "已悬停"
@@ -711,6 +716,7 @@ class Agent:
                 return "没找到下一页按钮；看看页面上有没有页码链接可以点，或者用 scroll 往下滑"
             sig = await self._signature()
             el = page.locator("[data-qp-next]").last
+            await self.pointer.to_element(page, el)
             try:
                 await el.click(timeout=5000)
             except Exception:
@@ -722,6 +728,7 @@ class Agent:
             return await self._changed(sig, "已翻到下一页")
         if kind == "type":
             el = self._element(a.get("ref"))
+            await self.pointer.to_element(page, el)
             await el.fill(str(a.get("text", "")), timeout=5000)
             if a.get("enter"):
                 sig = await self._signature()
@@ -734,6 +741,7 @@ class Agent:
         if kind == "select":
             el = self._element(a.get("ref"))
             option = str(a.get("option", ""))
+            await self.pointer.to_element(page, el)
             try:
                 await el.select_option(label=option, timeout=5000)
             except Exception:
@@ -746,6 +754,7 @@ class Agent:
             return await self.look(str(a.get("question", "描述这个页面")))
         if kind == "click_xy":
             sig = await self._signature()
+            await self.pointer.to_xy(page, float(a.get("x", 0)), float(a.get("y", 0)))
             await page.mouse.click(float(a.get("x", 0)), float(a.get("y", 0)))
             await asyncio.sleep(0.6)
             await self._follow_new_tab(before)
@@ -845,7 +854,8 @@ class Agent:
         return out
 
     async def look(self, question: str) -> str:
-        shot = await self.page.screenshot(type="jpeg", quality=60)
+        async with self.pointer.hidden(self.page):
+            shot = await self.page.screenshot(type="jpeg", quality=60)
         size = self.page.viewport_size or {}
         return await self._ask_image(
             shot, question, f"截图尺寸 {size.get('width', '?')}x{size.get('height', '?')}，坐标原点在左上角。"
@@ -859,7 +869,7 @@ class Agent:
         if flow is None:
             return f"没有名为「{name}」的流程"
         params = a.get("params") if isinstance(a.get("params"), dict) else {}
-        self.page = await replay(self.browser.context, self.page, flow, params, log=self.log)
+        self.page = await replay(self.browser.context, self.page, flow, params, log=self.log, pointer=self.pointer)
         await self._prepare(self.page)
         return f"已运行流程「{name}」，参数 {json.dumps(params, ensure_ascii=False)}"
 

@@ -190,7 +190,7 @@ class App:
             return
         agent = job.agent = Agent(browser, self.model, self.sites, self.kb, log=job.log.append,
                                   logged_in=self.logins.logged_in_sites(), vision=self.cfg.llm.vision != "off",
-                                  control=job.control)
+                                  control=job.control, pointer=self.cfg.browser.pointer)
         result = await agent.run(job.q, budget=job.budget)
         job.final = answer_dict(job.q, result.answer, job.round, result.urls)
 
@@ -273,7 +273,10 @@ class App:
         browser = await self._get_browser()
         page = await browser.context.new_page()
         await page.bring_to_front()
-        end = await replay(browser.context, page, flow, params, log=lambda *_: None)
+        from .pointer import Pointer
+
+        end = await replay(browser.context, page, flow, params, log=lambda *_: None,
+                           pointer=Pointer(self.cfg.browser.pointer))
         return end.url
 
     # --- knowledge base (prep without the terminal) --------------------------------

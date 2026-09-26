@@ -262,6 +262,10 @@ How it reads and works a page:
 - Pop-up dialogs are shown first; long menus are moved to the end.
 - Script-driven widgets (custom dropdowns, tabs, pagers) count as
   clickable too, and it can click by visible text.
+- An orange mouse pointer glides to each element before it's clicked or
+  typed into, outlines it and ripples on the click, so you can follow
+  along (hidden from the model's screenshots; `pointer = false` under
+  `[browser]` in quizpilot.toml turns it off).
 - It scrolls up and down (including scrollable panels inside a page, which
   load more as you scroll), turns result pages with `next_page`, hovers
   menus, and reads long pages chunk by chunk.

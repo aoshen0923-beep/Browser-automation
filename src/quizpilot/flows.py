@@ -352,7 +352,8 @@ async def _settle(page: Page) -> None:
         pass
 
 
-async def replay(context: BrowserContext, page: Page, flow: Flow, params: dict | None = None, log=print) -> Page:
+async def replay(context: BrowserContext, page: Page, flow: Flow, params: dict | None = None, log=print,
+                 pointer=None) -> Page:
     """Run a recorded flow with new parameter values; return the page it ends on."""
     params = {str(k): str(v) for k, v in (params or {}).items()}
     await goto(page, flow.start_url)
@@ -367,6 +368,8 @@ async def replay(context: BrowserContext, page: Page, flow: Flow, params: dict |
             loc = await _find_choice(page, step, value)
         else:
             loc = await _find(page, step)
+        if pointer is not None:
+            await pointer.to_element(page, loc, click=kind != "fill")
         if kind in ("click", "choose") and opens_tab:
             # The recording shows the next step in a window this click opens.
             async with context.expect_page(timeout=20000) as new_page:
