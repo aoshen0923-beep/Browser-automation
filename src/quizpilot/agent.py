@@ -21,7 +21,7 @@ from playwright.async_api import Page
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from . import pdftools
-from .browser import BLOCKED_RESOURCES, Browser, goto, page_blocked, wait_for_human
+from .browser import BLOCKED_RESOURCES, Browser, goto, page_blocked, page_interstitial, wait_for_human
 from .kb import KB
 from .llm import ChatModel, LLMError, VisionUnsupported
 from . import memory
@@ -219,10 +219,11 @@ RENDER_JS = r"""
   let text = out.join('').replace(/[ \t ]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{2,}/g, '\n').replace(/( \| ){2,}/g, ' | ');
   let vp = text.indexOf('\u0001');
   text = text.replace('\u0001', '');
-  const se = document.scrollingElement || document.documentElement;
-  const sb = box || se;
+  // Documents being replaced by a script can briefly have no root element.
+  const sb = box || document.scrollingElement || document.documentElement || document.body;
   return {title: document.title, url: location.href, text: text.trim(), vp: Math.max(0, vp),
-          scroll: {y: sb.scrollTop, h: sb.scrollHeight, v: box ? box.clientHeight : innerHeight}};
+          scroll: sb ? {y: sb.scrollTop, h: sb.scrollHeight, v: box ? box.clientHeight : innerHeight}
+                     : {y: 0, h: innerHeight, v: innerHeight}};
 }
 """
 
@@ -250,7 +251,9 @@ LOADING_JS = r"""
       break;
     }
   }
-  if (!loading) loading = [...document.querySelectorAll('.el-loading-mask,.layui-layer-loading,.ant-spin-spinning,.loading-mask')].some(vis);
+  if (!loading) loading = [...document.querySelectorAll(
+    '.el-loading-mask,.layui-layer-loading,.ant-spin-spinning,.loading-mask,[aria-busy="true"],' +
+    'prm-spinner:not(.hide),md-progress-circular,mat-spinner,mat-progress-spinner,.spinner-border,.lds-ring')].some(vis);
   return [(document.body ? document.body.innerText : '').length, loading];
 }
 """
@@ -368,6 +371,12 @@ SITE_TIPS = {
     "medrxiv.org": "检索直接用 https://www.medrxiv.org/search/关键词 ；详情页有版本、发布日期和 PDF",
     "biorxiv.org": "检索直接用 https://www.biorxiv.org/search/关键词 ；详情页有版本、发布日期和 PDF",
     "pubmed.ncbi.nlm.nih.gov": "检索直接用 https://pubmed.ncbi.nlm.nih.gov/?term=关键词",
+    "stats.gov.cn": "国家统计局的统计年鉴：各年份列表在 https://www.stats.gov.cn/sj/ndsj/ ，某一年的中文版目录是 "
+                    "https://www.stats.gov.cn/sj/ndsj/年份/indexch.htm （左边目录按章节列出各表，可看表格/下载）",
+    "馆藏查询": "图书馆馆藏题：每个图书馆有自己的书目检索系统（OPAC/发现系统），入口网址不要猜（猜错就是打不开的网址）——"
+               "先 search「XX大学图书馆 馆藏目录」或「XX图书馆 书目检索」找到入口，再在里面检索书名/ISBN。国外大学常见两种："
+               "Primo（网址含 primo.exlibrisgroup.com 或 /discovery/search?query=any,contains,书名）和 Blacklight（/catalog?q=书名）。"
+               "馆藏地、索书号、纸本/电子版要点进这本书的详情页看。一道题问好几个图书馆时用 open_many 同时查各馆。",
     "link.springer.com": "检索直接用 https://link.springer.com/search?query=关键词 ；Open access 文章有标记",
 }
 
@@ -381,6 +390,7 @@ TIP_NAMES = [
     (r"(?<![a-z])mit(?![a-z])", "dspace.mit.edu"), (r"doaj", "doaj.org"), (r"(?<!china)arxiv", "arxiv.org"),
     (r"oalib", "oalib.com"), (r"chinaxiv", "chinaxiv.org"), (r"medrxiv", "medrxiv.org"), (r"biorxiv", "biorxiv.org"),
     (r"pubmed", "pubmed.ncbi.nlm.nih.gov"), (r"springer", "link.springer.com"),
+    (r"统计年鉴|国家统计局", "stats.gov.cn"), (r"馆藏|索书号|opac|书目检索|图书馆.{0,12}(?:查询|检索|找到|有)", "馆藏查询"),
 ]
 
 
@@ -420,6 +430,27 @@ def option_terms(text: str) -> list[str]:
             seen.add(key)
             out.append(t)
     return out[:4]
+
+
+# Analytics and ad beacons: they slow pages down and keep "network idle" from ever arriving,
+# and no answer depends on them.
+_TRACKERS = re.compile(
+    r"^https?://([^/]+\.)?(google-analytics\.com|googletagmanager\.com|doubleclick\.net|googlesyndication\.com|"
+    r"googleadservices\.com|adservice\.google\.[a-z.]+|hm\.baidu\.com|cnzz\.com|umeng\.com|"
+    r"connect\.facebook\.net|hotjar\.com|scorecardresearch\.com|clarity\.ms|bat\.bing\.com|"
+    r"nr-data\.net|quantserve\.com|crazyegg\.com|mouseflow\.com|ads\.linkedin\.com|snap\.licdn\.com|"
+    r"analytics\.twitter\.com|static\.ads-twitter\.com)(/|:|$)", re.I)
+
+
+def _tracker(url: str) -> bool:
+    return bool(_TRACKERS.match(url))
+
+
+def _dead_url_hint(error: str) -> str:
+    if "ERR_NAME_NOT_RESOLVED" in error or "ERR_CONNECTION_REFUSED" in error or "ERR_ADDRESS_UNREACHABLE" in error:
+        return ("（这个网址不存在或连不上，多半是猜的：用 search 搜「网站名 + 馆藏目录/高级检索」等找到正确入口，"
+                "或者从网站首页点链接进去）")
+    return ""
 
 
 def _mark(status: str) -> str:
@@ -656,6 +687,7 @@ class Agent:
         self._rendered = ""
         self._downloads: list[str] = []
         self._kept = None
+        self._blocked_tabs: list = []
         self._checks: dict[str, str] = {}
         self.opened: list[Page] = []  # tabs this agent opened (the answering page tidies old ones)  # option letter -> "对：依据" / "错：…" / "待查"
         self.trace: list[dict] = []  # everything the model saw and did, for the run record
@@ -685,7 +717,8 @@ class Agent:
         blocked = {"media"} if self.vision else BLOCKED_RESOURCES
 
         async def handler(route):
-            if route.request.resource_type in blocked:
+            request = route.request
+            if request.resource_type in blocked or _tracker(request.url):
                 await route.abort()
             else:
                 await route.continue_()
@@ -775,7 +808,15 @@ class Agent:
             parts.append(f"[内嵌框架{i}]\n{fs['text']}")
         return "\n".join(parts)
 
+    async def _ensure_page(self) -> Page:
+        if self.page is None or self.page.is_closed():
+            self.page = await self._open_tab()
+            await self.page.bring_to_front()
+        return self.page
+
     async def observe(self) -> str:
+        if self.page is None:
+            return "（空白页，还没有打开任何网站）"
         page = self.page
         if self._is_pdf_url(page.url):
             try:
@@ -866,6 +907,8 @@ class Agent:
 
     async def act(self, a: dict) -> str:
         kind = a.get("action")
+        if kind != "open_many":
+            await self._ensure_page()
         page = self.page
         before = len(self.browser.context.pages)
         downloads = len(self._downloads)
@@ -1196,8 +1239,32 @@ class Agent:
             async with gate:
                 return await self._peek(i, url, words)
 
+        self._blocked_tabs = []
         results = await asyncio.gather(*(peek(i, url) for i, url in enumerate(urls, 1)))
+        for i, url, page, head in self._blocked_tabs:
+            # One at a time, in front, with the answering page's banner and beep.
+            self._note_site(url, "captcha", "出现过人机验证，别连续快速打开很多页面")
+            t0 = time.monotonic()
+            try:
+                await page.bring_to_front()
+                cleared = await wait_for_human(page, timeout=90, log=self.log)
+            except Exception:
+                cleared = False
+            self._paused_for += time.monotonic() - t0
+            if cleared:
+                try:
+                    await self._settle_tab(page, True)
+                    results[i - 1] = await self._read_tab(page, head, words)
+                    if i == 1:
+                        self._kept = page
+                    continue
+                except Exception:
+                    pass
+            results[i - 1] = f"{head}\n这个页面要人机验证，用户没有处理，没读到内容"
+        self._blocked_tabs = []
         kept, self._kept = self._kept, None
+        if kept is None and self.page is None:
+            self.page = next((p for p in self.opened if not p.is_closed()), None)
         if kept is not None:
             # Stay on the first page read, so the next step can click and scroll there.
             old = self.page
@@ -1209,10 +1276,55 @@ class Agent:
                 except Exception:
                     pass
             results.append(f"（现在停在【1】{kept.url} 上，要细看、点击、翻页就直接在这一页操作；不要再用 open_many 反复打开同样的网址）")
+        elif self.page is not None:
+            await self.page.bring_to_front()
         return "\n\n".join(results)
+
+    async def _settle_tab(self, page, checked: bool = False) -> None:
+        """Wait for a background tab's content, including results that script apps fetch later."""
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000 if checked else 3000)
+        except Exception:
+            pass
+        last = -1
+        for _ in range(14):
+            try:
+                length, loading = await page.evaluate(LOADING_JS)
+            except Exception:
+                break
+            if not loading and length >= 200:
+                break
+            if not loading and length == last and length >= 30:
+                break  # a short page that has stopped changing (an empty one is still loading)
+            last = length
+            await asyncio.sleep(0.8)
+
+    async def _read_tab(self, page, head: str, words: list[str]) -> str:
+        snap = None
+        for attempt in range(2):
+            try:
+                snap = await asyncio.wait_for(page.evaluate(RENDER_JS, {"prefix": "", "navCap": 15}), 20)
+                break
+            except Exception:
+                if attempt:
+                    raise
+                await asyncio.sleep(1.5)  # the page was being replaced by a script: try again
+        text = _plain(snap["text"])
+        self._save(snap["url"], snap["title"], snap["text"])
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        out = [f"{head}\n标题：{snap['title']}"]
+        for word in words[:5]:
+            hits = [" / ".join(lines[max(0, j - 2): j + 2])[:360]
+                    for j, ln in enumerate(lines) if word.lower() in ln.lower()][:6]
+            out.append(f"“{word}”：" + ("\n  ".join(hits) if hits else "页面中没有"))
+        body = " ".join(lines)
+        out.append("开头内容：" + (body[:900] if body else "（页面上没有文字：可能还没加载出来，或需要登录/验证；要看就 goto 这个网址）"))
+        return "\n".join(out)
 
     async def _peek(self, i: int, url: str, words: list[str]) -> str:
         page = await self._open_tab()
+        if i == 1:
+            await page.bring_to_front()  # show the first page loading, not an empty tab
         keep = False
         head = f"【{i}】{url}"
         try:
@@ -1224,58 +1336,38 @@ class Agent:
             if "pdf" in ctype or self._is_pdf_url(page.url):
                 return f"{head}\n" + await self.read_pdf({"url": page.url, "find": words[0] if words else ""})
             checked = False
-            for _ in range(15):  # most "Just a moment..." checks pass by themselves within seconds
-                if not await page_blocked(page):
+            for _ in range(15):  # "Just a moment..." checks pass by themselves within seconds
+                if not await page_interstitial(page):
                     break
                 checked = True
                 await asyncio.sleep(1)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=5000 if checked else 3000)
-            except Exception:
-                pass
-            last = -1
-            for _ in range(12):  # results that arrive after the page itself
-                try:
-                    length, loading = await page.evaluate(LOADING_JS)
-                except Exception:
-                    break
-                if not loading and (length >= 200 or length == last):
-                    break  # has content, or a short page that has stopped changing
-                last = length
-                await asyncio.sleep(0.8)
             if await page_blocked(page):
-                self._note_site(url, "captcha", "出现过人机验证，别连续快速打开很多页面")
-                self.log(f"  (后台标签页要人机验证：{url[:70]}，已留在浏览器里)")
-                return f"{head}\n这个页面要人机验证，没读到内容（标签页留着）；要看它就 goto 这个网址，程序会等用户完成验证"
-            snap = await asyncio.wait_for(page.evaluate(RENDER_JS, {"prefix": "", "navCap": 15}), 20)
-            text = _plain(snap["text"])
-            self._save(snap["url"], snap["title"], snap["text"])
-            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-            out = [f"{head}\n标题：{snap['title']}"]
-            for word in words[:5]:
-                hits = [" / ".join(lines[max(0, j - 2): j + 2])[:360]
-                        for j, ln in enumerate(lines) if word.lower() in ln.lower()][:6]
-                out.append(f"“{word}”：" + ("\n  ".join(hits) if hits else "页面中没有"))
-            out.append("开头内容：" + " ".join(lines)[:900])
+                # A person has to solve it: handled after the other tabs (with the banner and beep).
+                keep = True
+                self._blocked_tabs.append((i, url, page, head))
+                return f"{head}\n（要人机验证，等用户处理）"
+            await self._settle_tab(page, checked)
+            result = await self._read_tab(page, head, words)
             if i == 1:
                 keep = True
                 self._kept = page
-            return "\n".join(out)
+            return result
         except Exception as e:
-            return f"{head}\n打开失败：{type(e).__name__}: {str(e).splitlines()[0][:120] if str(e) else ''}"
+            msg = str(e).splitlines()[0][:120] if str(e) else ""
+            return f"{head}\n打开失败：{type(e).__name__}: {msg}{_dead_url_hint(msg)}"
         finally:
-            try:
-                if not keep and not await page_blocked(page):
+            if not keep:
+                try:
                     await page.close()
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
     async def _fetch_in_page(self, url: str) -> bytes:
         """Download with the browser's own session (cookies, anti-bot checks passed)."""
         from base64 import b64decode
 
         origin = urlparse(url)
-        pages = [self.page, *self.browser.context.pages]
+        pages = [p for p in (self.page, *self.browser.context.pages) if p is not None]
         for page in pages:
             try:
                 if page.is_closed() or urlparse(page.url).netloc != origin.netloc:
@@ -1602,8 +1694,7 @@ class Agent:
             self._load_recipes(q)
             if self._recipes:
                 self.log(f"  (found {len(self._recipes)} saved approach(es) for similar questions)")
-            self.page = await self._open_tab()
-            await self.page.bring_to_front()
+            self.page = None  # opened on the first action that needs it (no empty tab in front)
             steps = self._steps = []
             observation = "（空白页，还没有打开任何网站）"
         final: dict | None = None
@@ -1683,6 +1774,8 @@ class Agent:
                                        "result": result if isinstance(result, str) else "被用户打断",
                                        "seconds": round(time.monotonic() - t_act, 1),
                                        "url": self.page.url if self.page is not None and not self.page.is_closed() else ""})
+                    if isinstance(result, str) and result.startswith("失败"):
+                        result += _dead_url_hint(result)
                     if result is _INTERRUPTED:
                         steps.append(Step(action, "被用户打断"))
                         interrupted = True

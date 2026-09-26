@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -67,7 +68,9 @@ def alert(message: str) -> None:
 # ScienceDirect redirecting to its sign-in host or a JS redirect firing
 # before DOMContentLoaded. The tab is fine; it just ended up elsewhere.
 _REDIRECTED = ("net::ERR_ABORTED", "frame was detached", "interrupted by another navigation",
-               "Navigation failed because page was closed", "ERR_BLOCKED_BY_RESPONSE")
+               "Navigation failed because page was closed", "ERR_BLOCKED_BY_RESPONSE",
+               # an error status (403/500...) with a page the site still shows, often a bot check
+               "ERR_HTTP_RESPONSE_CODE_FAILURE")
 
 
 def navigation_redirected(error: Exception) -> bool:
@@ -92,12 +95,30 @@ async def goto(page: Page, url: str, timeout_ms: int = 30000):
     return None
 
 
-async def page_blocked(page: Page) -> bool:
+# Interstitial pages recognisable by their title alone (their body can be nearly empty).
+_CHALLENGE_TITLES = re.compile(r"^\s*(just a moment|attention required|one more step|请稍候|正在验证)", re.I)
+
+
+async def page_interstitial(page: Page) -> bool:
+    """A browser check that passes by itself in a few seconds (Cloudflare's "Just a moment...")."""
     try:
-        text = await page.evaluate(
-            "() => document.title + '\\n' + (document.body && document.body.innerText || '').slice(0, 4000)")
+        title, text = await page.evaluate(
+            "() => [document.title, (document.body && document.body.innerText || '').slice(0, 1500)]")
     except Exception:
         return False
+    low = (text or "").lower()
+    return bool(_CHALLENGE_TITLES.match(title or "")) or any(
+        w in low for w in ("checking your browser", "verifying you are human", "just a moment", "正在验证您是否是真人"))
+
+
+async def page_blocked(page: Page) -> bool:
+    try:
+        title, text = await page.evaluate(
+            "() => [document.title, (document.body && document.body.innerText || '').slice(0, 4000)]")
+    except Exception:
+        return False
+    if _CHALLENGE_TITLES.match(title or ""):
+        return True
     return looks_like_challenge(text, [f.url for f in page.frames])
 
 

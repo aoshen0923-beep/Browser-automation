@@ -159,7 +159,7 @@ class App:
         for job in done[:-keep_jobs] if keep_jobs else done:
             for page in list(getattr(job.agent, "opened", [])):
                 try:
-                    if not page.is_closed() and not await page_blocked_safe(page):
+                    if not page.is_closed():  # verification pages too: that question is over
                         await page.close()
                 except Exception:
                     pass
@@ -211,7 +211,8 @@ class App:
             else:
                 # The quick answer and the browser research start together: on a hard question the
                 # model can think for a minute, and the browser shouldn't wait for it.
-                quick = asyncio.ensure_future(asyncio.to_thread(solve, job.q, self.kb, self.model, self.cfg.solver.top_k))
+                quick = asyncio.ensure_future(
+                    asyncio.to_thread(solve, job.q, self.kb, self.model, self.cfg.solver.top_k, True))
                 quick.add_done_callback(lambda t: self._set_quick(job, t))
                 if not job.control.stop:
                     if not job.paused:

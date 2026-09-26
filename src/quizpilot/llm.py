@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Protocol
 
 import httpx
@@ -77,12 +78,17 @@ class OpenAICompatible:
             transport=transport,
         )
 
-    def chat_json(self, system: str, user: str, max_tokens: int = 700, images: list[bytes] | None = None) -> dict:
-        # Reasoning models can spend the whole token budget thinking and
-        # return empty content; retry once with a much larger budget.
-        budget = max(max_tokens, 1500)
+    # Token budgets per attempt. Reasoning models think before answering; a budget
+    # that cuts the thinking off wastes the whole attempt, so the first one is
+    # generous (unused budget costs nothing) and each retry has more room.
+    BUDGETS = (3000, 8000, 16000)
+
+    def chat_json(self, system: str, user: str, max_tokens: int = 700, images: list[bytes] | None = None,
+                  attempts: int = 3) -> dict:
         salvaged: dict | None = None
-        for attempt in range(3):  # 1500 → 4500 → 13500 tokens for hard multi-choice questions
+        finish = ""
+        for budget in self.BUDGETS[:max(1, attempts)]:
+            budget = max(budget, max_tokens)
             content, finish = self._complete(system, user, budget, images)
             if content.strip():
                 try:
@@ -96,7 +102,6 @@ class OpenAICompatible:
                 salvaged = salvaged or reply
                 if finish != "length":
                     break
-            budget *= 3  # cut off (usually by reasoning): retry with more room
         if salvaged:
             return salvaged
         raise LLMError(f"model returned an empty or cut-off reply (finish_reason={finish})")
@@ -117,10 +122,18 @@ class OpenAICompatible:
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
-        try:
-            r = self.client.post("/chat/completions", json=body)
-        except httpx.HTTPError as e:
-            raise LLMError(f"request failed: {e}") from e
+        r = None
+        for wait in (2, 5, None):
+            try:
+                r = self.client.post("/chat/completions", json=body)
+                break
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ReadError) as e:
+                # Wi-Fi hiccups ("getaddrinfo failed", "unreachable network"): wait and try again.
+                if wait is None:
+                    raise LLMError(f"request failed: {e}") from e
+                time.sleep(wait)
+            except httpx.HTTPError as e:
+                raise LLMError(f"request failed: {e}") from e
         if r.status_code != 200:
             if images and r.status_code in (400, 415, 422):
                 raise VisionUnsupported(f"model rejected image input: HTTP {r.status_code}: {r.text[:200]}")

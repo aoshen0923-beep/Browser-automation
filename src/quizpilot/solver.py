@@ -75,7 +75,9 @@ def normalize_answer(q: Question, raw: object) -> str:
     return letters
 
 
-def solve(q: Question, kb: KB, model: ChatModel, top_k: int = 8) -> Answer:
+def solve(q: Question, kb: KB, model: ChatModel, top_k: int = 8, light: bool = False) -> Answer:
+    """light: a single model attempt, for when browser research runs at the same time
+    (a long-thinking quick answer otherwise competes with it for the API)."""
     start = time.monotonic()
     from .memory import known_answer
 
@@ -86,7 +88,13 @@ def solve(q: Question, kb: KB, model: ChatModel, top_k: int = 8) -> Answer:
     query = q.stem + " " + " ".join(q.options.values())
     hits = kb.search(query, k=top_k)
     try:
-        reply = model.chat_json(SYSTEM, build_prompt(q, hits))
+        import inspect
+
+        takes_attempts = "attempts" in inspect.signature(model.chat_json).parameters
+        if light and takes_attempts:
+            reply = model.chat_json(SYSTEM, build_prompt(q, hits), attempts=1)
+        else:
+            reply = model.chat_json(SYSTEM, build_prompt(q, hits))
     except Exception as e:  # network/API errors must not crash the answer loop
         return Answer("", 0.0, error=str(e), seconds=time.monotonic() - start)
 

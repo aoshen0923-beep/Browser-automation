@@ -54,7 +54,7 @@ def test_empty_reply_is_retried_with_a_bigger_budget():
 
     client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
     assert client.chat_json("s", "u", 400) == {"answer": "C"}
-    assert budgets[1] == budgets[0] * 3 and budgets[0] >= 1500
+    assert budgets == [3000, 8000]  # the second attempt has more room
 
 
 def test_empty_twice_raises_clear_error():
@@ -84,7 +84,26 @@ def test_cut_off_reply_is_retried_then_salvaged():
 
     client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
     got = client.chat_json("s", "u")
-    assert got["answer"] == "B" and len(calls) == 3 and calls[1] == calls[0] * 3 and calls[2] == calls[1] * 3
+    assert got["answer"] == "B" and calls == [3000, 8000, 16000]
+    # The quick answer next to live research makes a single attempt (it shouldn't hog the API).
+    calls.clear()
+    assert client.chat_json("s", "u", attempts=1)["answer"] == "B" and calls == [3000]
+
+
+def test_network_hiccups_are_retried(monkeypatch):
+    import quizpilot.llm as llm
+
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    tries = []
+
+    def handler(request):
+        tries.append(1)
+        if len(tries) < 3:
+            raise httpx.ConnectError("[Errno 11001] getaddrinfo failed")
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"answer":"A"}'}, "finish_reason": "stop"}]})
+
+    client = OpenAICompatible(LLMConfig(api_key="k"), transport=httpx.MockTransport(handler))
+    assert client.chat_json("s", "u") == {"answer": "A"} and len(tries) == 3
 
 
 def test_images_are_sent_and_rejection_is_recognized():

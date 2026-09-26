@@ -350,3 +350,43 @@ def test_no_blind_retries_and_checklist_marks_are_checked():
     agent._remember("Article Type: Research Article (2893849) / Review Article (95345) / Book Review / Editorial")
     agent._checks = {"A": "错：没有独立的Article", "B": "对", "C": "对", "D": "对"}
     assert "出现过" in dict(agent._suspicious(tf))["A"]  # 'Article' does appear (as Research Article)
+
+
+def test_slow_catalogs_background_checks_and_no_blank_tab(library, chrome):  # noqa: F811
+    from quizpilot.agent import _dead_url_hint, _tracker
+
+    logs = []
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, None, [], None, log=logs.append)
+            assert agent.page is None
+            assert await agent.observe() == "（空白页，还没有打开任何网站）"
+
+            async def person():  # solves the verification once the banner asks for it
+                while not any("需要人机验证" in line for line in logs):
+                    await asyncio.sleep(0.2)
+                page = next(p for p in browser.context.pages if p.url.endswith("/verify.html"))
+                await page.click("#ok")
+
+            helper = asyncio.create_task(person())
+            out = await agent.act({"action": "open_many", "find": "HA34|General Collections", "urls": [
+                library + "/spa.html", library + "/verify.html"]})
+            await helper
+            # The empty-at-first catalog was read once its results arrived.
+            assert "HA34.P65 2018" in out, out
+            # The verification page got the banner, waited for the person, then was read.
+            assert "General Collections" in out.split("【2】")[1], out
+            assert any("验证已通过" in line for line in logs)
+            # No empty tab was ever put in front: the agent stands on the first page it read.
+            assert agent.page.url.endswith("/spa.html")
+            assert not any(p.url == "about:blank" for p in agent.opened if not p.is_closed())
+            # A page whose document is being replaced by a script doesn't break the reader.
+            await agent.page.evaluate("document.removeChild(document.documentElement)")
+            snap = await agent._render()
+            assert snap["text"] == "" and snap["scroll"]["y"] == 0
+
+    asyncio.run(run())
+    assert "search" in _dead_url_hint("失败：Error: net::ERR_NAME_NOT_RESOLVED at https://opac.cqu.edu.cn/")
+    assert _dead_url_hint("失败：TimeoutError") == ""
+    assert _tracker("https://hm.baidu.com/hm.js?1") and not _tracker("https://opaclib.hainanu.edu.cn/opac/search")

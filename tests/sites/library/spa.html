@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8"><title>Catalog Search</title>
+<body></body>
+<script>
+  // Like Primo / Angular catalogs: nothing in the page at first, results arrive a few seconds later.
+  setTimeout(() => {
+    document.body.innerHTML = '<h1>Search results</h1><div class="result">The politics of big data: big data, big brother? ' +
+      '<span>Call number: HA34.P65 2018</span></div>' + '<p>More records</p>'.repeat(30);
+  }, 3000);
+</script>

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quizpilot"
-version = "0.1.21"
+version = "0.1.22"
 description = "Local-first research co-pilot for the AI+ information literacy contest"
 readme = "README.md"
 requires-python = ">=3.11"
