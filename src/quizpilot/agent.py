@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from urllib.parse import quote_plus, urljoin
 
 from playwright.async_api import Page
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from . import pdftools
 from .browser import BLOCKED_RESOURCES, Browser, goto, page_blocked, wait_for_human
@@ -86,7 +87,8 @@ actions 最多3个，按顺序执行；会改变页面的动作（goto/search/cl
 {"action":"click","ref":12}                          点击编号为12的元素（内嵌框架里的元素编号形如 "2-5"）
 {"action":"type","ref":5,"text":"...","enter":true}  在输入框5输入文字，enter=true 表示输入后按回车
 {"action":"select","ref":7,"option":"学位论文"}         在下拉框7中选择一个选项
-{"action":"find","text":"起草人"}                      在当前页面全文中查找关键词（页面很长时用）
+{"action":"find","text":"起草人|起草单位"}             在当前页面全文中查找关键词（多个关键词用 | 分隔）
+{"action":"read","from":5000}                        读取当前页面第5000字之后的内容（页面文字被截断时用）
 {"action":"pdf","url":"(可省略=当前页)","page":2,"find":"关键词"}  读取PDF：页数、指定页（负数从末尾算，-2=倒数第二页）、或查找关键词
 {"action":"back"}                                    返回上一页
 {"action":"look","question":"柱状图里排第一的作者是谁？"}  看当前页面截图回答问题（图表、只有图标没有文字的按钮、页面布局）；要点击图标时问它的位置
@@ -104,7 +106,10 @@ SYSTEM_TEMPLATE = """你在操作用户的Chrome浏览器，为信息素养大�
 5. 页面需要登录或出现验证码时，程序会暂停等用户处理，你继续即可。
 6. 题库、答案分享、问答类网站（如 itihey、百度知道、百度文库、作业帮、道客巴巴）上的答案经常是错的，
    只能当线索，要到官方网站核实；只凭这类网站作答时 confidence 不要超过0.5。
-7. answer 不能为空：单选一个字母，多选2-4个字母，判断题"对"或"错"。时间不够时也要给出最可能的答案，用 confidence（0-1，诚实）表示把握。
+7. 答案常在页面后半部分（详情、表格、全文、名单）：页面文字被截断时先用 find 查题目关键词或用 read 读后面的内容，
+   看全了再 answer，不要只看开头就下结论；每个选项都要在页面上找到依据。
+8. 页面还在加载时程序会多等一会；用户也可能暂停你、自己操作浏览器后让你继续，这时当前页面就是用户找到的页面，先仔细读它。
+9. answer 不能为空：单选一个字母，多选2-4个字母，判断题"对"或"错"。时间不够时也要给出最可能的答案，用 confidence（0-1，诚实）表示把握。
 {actions}
 
 网站目录（模块：网址）：
@@ -155,6 +160,44 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[:n] + f"…(共{len(text)}字，用 find 查找)"
 
 
+class Control:
+    """The buttons on the answering page: 我来操作 (pause), 继续作答, 停止.
+
+    Methods are called on the event loop (the web server uses
+    loop.call_soon_threadsafe). `changed` wakes up whatever the agent is
+    waiting on (a model call, a slow page) so a button acts at once.
+    """
+
+    def __init__(self):
+        self.stop = False
+        self._resume = asyncio.Event()
+        self._resume.set()
+        self.changed = asyncio.Event()
+
+    @property
+    def paused(self) -> bool:
+        return not self._resume.is_set()
+
+    def pause(self) -> None:
+        if not self.stop:
+            self._resume.clear()
+            self.changed.set()
+
+    def resume(self) -> None:
+        self._resume.set()
+
+    def request_stop(self) -> None:
+        self.stop = True
+        self._resume.set()
+        self.changed.set()
+
+    async def wait_resumed(self) -> None:
+        await self._resume.wait()
+
+
+_INTERRUPTED = object()
+
+
 class Agent:
     def __init__(
         self,
@@ -164,10 +207,11 @@ class Agent:
         kb: KB | None = None,
         *,
         max_items: int = 70,
-        max_text: int = 2500,
+        max_text: int = 5000,
         log=print,
         logged_in: list[dict] | None = None,
         vision: bool = True,
+        control: Control | None = None,
     ):
         self.browser = browser
         self.model = model
@@ -190,6 +234,11 @@ class Agent:
         self._recipes: list[str] = []
         self._flows: list = []
         self._saved: set[str] = set()
+        self._prepared: set = set()
+        self._steps: list[Step] = []
+        self._paused_for = 0.0
+        self._previous = ""
+        self.control = control
 
     # --- page handling -------------------------------------------------------------
 
@@ -199,6 +248,9 @@ class Agent:
         return page
 
     async def _prepare(self, page: Page) -> None:
+        if page in self._prepared:
+            return
+        self._prepared.add(page)
         # With vision on, images must load or screenshots show empty boxes.
         blocked = {"media"} if self.vision else BLOCKED_RESOURCES
 
@@ -211,19 +263,47 @@ class Agent:
         await page.route("**/*", handler)
 
     async def _settle(self) -> None:
+        busy = False
         try:
-            await self.page.wait_for_load_state("domcontentloaded", timeout=8000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
         except Exception:
-            pass
+            busy = True
         try:
             await self.page.wait_for_load_state("networkidle", timeout=2500)
         except Exception:
-            pass  # pages with polling never go idle; the DOM is enough
+            busy = True  # still loading, or a page that polls forever
+        if busy:
+            await self._wait_for_content()
         if await page_blocked(self.page):
+            t0 = time.monotonic()
             await self.page.unroute("**/*")  # the CAPTCHA picture must load
+            self._prepared.discard(self.page)
             await self.page.reload(wait_until="domcontentloaded")
             await wait_for_human(self.page, log=self.log)
             await self._prepare(self.page)
+            self._paused_for += time.monotonic() - t0  # a person's time, not the research budget
+
+    async def _wait_for_content(self, limit: float = 15.0) -> None:
+        """Slow sites: the page is there but its results are still loading."""
+        probe = """() => { const t = document.body ? document.body.innerText : '';
+                     return [t.length, t.length < 1500 && /加载中|正在加载|数据加载|请稍候|loading/i.test(t)]; }"""
+        deadline = time.monotonic() + limit
+        last, same, noted = -1, 0, False
+        while time.monotonic() < deadline:
+            try:
+                length, loading = await self.page.evaluate(probe)
+            except Exception:
+                return
+            if length >= 200 and not loading:
+                return
+            same = same + 1 if length == last and not loading else 0
+            if same >= 3 and length > 0:
+                return  # a short page that has stopped changing
+            last = length
+            if not noted:
+                noted = True
+                self.log("  (页面加载较慢，再等一会…等不及可以点「我来操作」)")
+            await asyncio.sleep(0.8)
 
     async def _follow_new_tab(self, before: int) -> None:
         pages = self.browser.context.pages
@@ -252,7 +332,10 @@ class Agent:
         if self._is_pdf_url(page.url):
             return f"当前页是PDF：{page.url}\n用 pdf 动作读取。"
         try:
-            snap = await page.evaluate(SNAPSHOT_JS, {"maxItems": self.max_items, "maxText": self.max_text, "prefix": ""})
+            snap = await asyncio.wait_for(
+                page.evaluate(SNAPSHOT_JS, {"maxItems": self.max_items, "maxText": self.max_text, "prefix": ""}), 20)
+        except asyncio.TimeoutError:
+            return f"页面还在加载，暂时读不到内容：{page.url}（可以换一个网站，或等一会再看）"
         except Exception as e:
             return f"读取页面失败：{e}"
         self._frames = {}
@@ -273,7 +356,12 @@ class Agent:
             self._save(fs["url"], fs["title"], fs["text"])
         self._save(snap["url"], snap["title"], snap["text"])
         body = "\n".join(texts)
-        parts.append(f"\n页面文字（主页面共{snap['textLength']}字，这里是开头部分，长页面用 find 查找）：\n{body}")
+        if snap["textLength"] > self.max_text:
+            head = (f"\n页面文字（主页面共{snap['textLength']}字，这里只是前{self.max_text}字；"
+                    f"后面的内容用 read（from={self.max_text}）读取，或用 find 查关键词）：")
+        else:
+            head = f"\n页面文字（共{snap['textLength']}字，已全部列出）："
+        parts.append(f"{head}\n{body}")
         return "\n".join(parts)
 
     def _save(self, url: str, title: str, text: str) -> None:
@@ -309,7 +397,11 @@ class Agent:
             url = str(a.get("url", "")).strip()
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
-            resp = await goto(page, url, 20000)
+            try:
+                resp = await goto(page, url, 40000)
+            except PlaywrightTimeout:
+                await self._wait_for_content(5)
+                return "页面加载很慢（40秒还没完全打开），先看已经显示出来的部分；是空白就换一个网站"
             ctype = (resp.headers.get("content-type", "") if resp else "").lower()
             if "pdf" in ctype:
                 return await self.read_pdf({"url": url})
@@ -319,7 +411,7 @@ class Agent:
             q = quote_plus(str(a.get("query", "")))
             engine = str(a.get("engine", "bing")).lower()
             url = f"https://www.baidu.com/s?wd={q}" if engine == "baidu" else f"https://cn.bing.com/search?q={q}"
-            await goto(page, url, 20000)
+            await goto(page, url, 30000)
             await self._settle()
             return "已搜索"
         if kind == "click":
@@ -365,6 +457,8 @@ class Agent:
             return "已按坐标点击"
         if kind == "find":
             return await self.find_text(str(a.get("text", "")))
+        if kind == "read":
+            return await self.read_more(a.get("from"))
         if kind == "pdf":
             return await self.read_pdf(a)
         if kind == "back":
@@ -413,24 +507,42 @@ class Agent:
         await self._prepare(self.page)
         return f"已运行流程「{name}」，参数 {json.dumps(params, ensure_ascii=False)}"
 
-    async def find_text(self, needle: str) -> str:
-        if not needle:
-            return "find 需要 text"
+    async def _page_text(self) -> str:
         text = ""
         for frame in [self.page.main_frame, *self._frames.values()]:
             try:
                 text += "\n" + await frame.evaluate("() => document.body ? document.body.innerText : ''")
             except Exception:
                 continue
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        hits = []
-        for i, ln in enumerate(lines):
-            if needle.lower() in ln.lower():
-                ctx = " / ".join(lines[max(0, i - 1) : i + 2])
-                hits.append(ctx[:300])
-            if len(hits) >= 15:
-                break
-        return f"找到{len(hits)}处“{needle}”：\n" + "\n".join(hits) if hits else f"页面中没有“{needle}”"
+        return re.sub(r"\n\s*\n+", "\n", text).strip()
+
+    async def find_text(self, needle: str) -> str:
+        needles = [n.strip() for n in needle.split("|") if n.strip()]
+        if not needles:
+            return "find 需要 text"
+        lines = [ln.strip() for ln in (await self._page_text()).splitlines() if ln.strip()]
+        out = []
+        for word in needles[:5]:
+            hits = []
+            for i, ln in enumerate(lines):
+                if word.lower() in ln.lower():
+                    hits.append(" / ".join(lines[max(0, i - 1) : i + 2])[:300])
+                if len(hits) >= 15:
+                    break
+            out.append(f"找到{len(hits)}处“{word}”：\n" + "\n".join(hits) if hits else f"页面中没有“{word}”")
+        return "\n".join(out)
+
+    async def read_more(self, start: object = None) -> str:
+        text = await self._page_text()
+        try:
+            start = max(0, int(start)) if start is not None else self.max_text
+        except (TypeError, ValueError):
+            start = self.max_text
+        if start >= len(text):
+            return f"页面共{len(text)}字，已经读到末尾了"
+        end = min(len(text), start + self.max_text)
+        more = f"；后面还有，用 read（from={end}）继续" if end < len(text) else "，已读到末尾"
+        return f"页面第{start}-{end}字（共{len(text)}字{more}）：\n{text[start:end]}"
 
     async def read_pdf(self, a: dict) -> str:
         url = str(a.get("url") or self.page.url)
@@ -497,6 +609,8 @@ class Agent:
                 parts.append(f"{i}. {json.dumps(s.action, ensure_ascii=False)} → {_clip(s.result, 300)}")
         if self._memory:
             parts.append(f"\n你上一步记下的要点：{self._memory}")
+        if self._previous:
+            parts.append(f"\n上一轮时间到时给出的答案是 {self._previous}，用户觉得还不够确定，请继续核实（找到原文依据再 answer）。")
         parts.append(f"\n当前页面：\n{observation}")
         if force:
             parts.append("\n时间到了：现在必须输出 answer 动作，给出最可能的答案。")
@@ -560,29 +674,108 @@ class Agent:
         except Exception:
             pass
 
-    async def run(self, q: Question, budget: float = 75, max_steps: int = 15, close: bool = False) -> LiveResult:
+    # --- buttons on the answering page ----------------------------------------------
+
+    async def _interruptible(self, coro):
+        """Await coro, unless 我来操作 / 停止 is pressed first (then cancel it)."""
+        task = asyncio.ensure_future(coro)
+        if self.control is None:
+            return await task
+        waiter = asyncio.ensure_future(self.control.changed.wait())
+        try:
+            done, _ = await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            waiter.cancel()
+        if task in done:
+            return task.result()
+        task.cancel()
+        try:
+            await task
+        except BaseException:
+            pass
+        return _INTERRUPTED
+
+    async def _user_page(self, known: set) -> Page:
+        """The tab the person left in front: a tab they opened, else ours."""
+        pages = [p for p in self.browser.context.pages if not p.is_closed()]
+        visible = []
+        for p in pages:
+            try:  # a tab still waiting for its server can't answer; skip it
+                if await asyncio.wait_for(p.evaluate("() => document.visibilityState === 'visible'"), 1.5):
+                    visible.append(p)
+            except Exception:
+                continue
+        new = [p for p in pages if p not in known]
+        ours = self.page if self.page is not None and not self.page.is_closed() else None
+        for group in ([p for p in new if p in visible], [ours] if ours in visible else [], visible, new, [ours] if ours else [], pages):
+            if group:
+                return group[-1]
+        return await self._open_tab()
+
+    async def _wait_for_user(self, steps: list[Step]) -> str:
+        self.log("  ⏸ 已暂停：请在浏览器里自己操作（等页面加载完、翻到有答案的地方、登录等），好了点「继续作答」")
+        known = set(self.browser.context.pages)
+        t0 = time.monotonic()
+        await self.control.wait_resumed()
+        self._paused_for += time.monotonic() - t0
+        return await self._take_over_from_user(steps, known)
+
+    async def _take_over_from_user(self, steps: list[Step], known: set) -> str:
+        self.page = await self._user_page(known)
+        await self._prepare(self.page)
+        url = self.page.url
+        self.log(f"  ▶ 继续：从你当前的页面接着找 {url[:90]}")
+        steps.append(Step({"action": "用户手动操作"},
+                          f"用户自己操作了浏览器，现在停在 {url}。这一页很可能就有答案，先仔细读（需要时用 find / read）"))
+        return await self.observe()
+
+    # --- the loop ------------------------------------------------------------------
+
+    async def run(self, q: Question, budget: float = 75, max_steps: int | None = None, close: bool = False,
+                  resume: bool = False) -> LiveResult:
+        """Research q in the browser; resume=True keeps going from where the last run (or the person) left off."""
         start = time.monotonic()
-        self._memory = ""
-        self._load_recipes(q)
-        if self._recipes:
-            self.log(f"  (found {len(self._recipes)} saved approach(es) for similar questions)")
-        self.page = await self._open_tab()
-        await self.page.bring_to_front()
-        steps: list[Step] = []
-        observation = "（空白页，还没有打开任何网站）"
+        self._paused_for = 0.0
+        max_steps = max_steps or max(15, int(budget / 5))
+        if resume and self.page is not None:
+            steps = self._steps
+            self.log(f"  继续查找（再查 {budget:.0f} 秒）")
+            observation = await self._take_over_from_user(steps, set(self.browser.context.pages))
+        else:
+            self._memory = ""
+            self._previous = ""
+            self._load_recipes(q)
+            if self._recipes:
+                self.log(f"  (found {len(self._recipes)} saved approach(es) for similar questions)")
+            self.page = await self._open_tab()
+            await self.page.bring_to_front()
+            steps = self._steps = []
+            observation = "（空白页，还没有打开任何网站）"
         final: dict | None = None
         failures = 0
+        n = 0
         try:
-            for n in range(1, max_steps + 1):
-                elapsed = time.monotonic() - start
-                force = elapsed > budget - 6 or n == max_steps
-                acts = await self._decide(q, steps, observation, budget - elapsed, force)
-                if force and not any(a.get("action") == "answer" for a in acts):
-                    # Out of time or steps: insist on an answer once.
-                    acts = await self._decide(q, steps, observation, 0, True)
+            while True:
+                if self.control is not None:
+                    if self.control.paused:
+                        observation = await self._wait_for_user(steps)
+                    self.control.changed.clear()
+                    if self.control.stop:
+                        self.log("  ■ 停止查找，用已经看到的内容作答")
+                n += 1
+                elapsed = time.monotonic() - start - self._paused_for
+                stopped = self.control is not None and self.control.stop
+                force = stopped or elapsed > budget - 6 or n >= max_steps
                 if force:
+                    acts = await self._decide(q, steps, observation, 0, True)
+                    if not any(a.get("action") == "answer" for a in acts):
+                        acts = await self._decide(q, steps, observation, 0, True)
                     final = next((a for a in acts if a.get("action") == "answer"), acts[0])
                     break
+                acts = await self._interruptible(self._decide(q, steps, observation, budget - elapsed, False))
+                if acts is _INTERRUPTED:
+                    n -= 1
+                    continue
                 if acts[0].get("action") == "_invalid":
                     failures = failures + 1 if acts[0].get("failed") else 0
                     if failures >= 3:
@@ -592,6 +785,7 @@ class Agent:
                     continue
                 failures = 0
                 last_kind = None
+                interrupted = False
                 for j, action in enumerate(acts):
                     kind = action.get("action")
                     if kind == "answer":
@@ -605,16 +799,23 @@ class Agent:
                         break
                     self.log(f"  {label} {_describe(action)}")
                     try:
-                        result = await asyncio.wait_for(self.act(action), timeout=90 if kind == "flow" else 30)
+                        result = await self._interruptible(
+                            asyncio.wait_for(self.act(action), timeout=120 if kind == "flow" else 60))
                     except Exception as e:
                         result = f"失败：{type(e).__name__}: {str(e).splitlines()[0][:150] if str(e) else ''}"
+                    if result is _INTERRUPTED:
+                        steps.append(Step(action, "被用户打断"))
+                        interrupted = True
+                        break
                     steps.append(Step(action, result))
                     last_kind = kind
                     if result.startswith("失败") or kind in PAGE_CHANGING or (kind == "type" and action.get("enter")):
                         break  # element numbers are stale now; look at the page again
                 if final is not None:
                     break
-                if last_kind in ("find", "pdf"):
+                if interrupted:
+                    continue
+                if last_kind in ("find", "pdf", "read"):
                     observation = f"（仍在 {self.page.url}）\n{steps[-1].result}"
                 else:
                     observation = await self.observe()
@@ -647,6 +848,7 @@ class Agent:
             reason = "（依据来自题库/答案分享网站，可能不准，建议到官方网站核实）" + reason
         if answer:
             self._save_recipe(q, steps, final, conf)
+            self._previous = f"{answer}（把握 {conf:.2f}）"
         ans = Answer(answer, conf, reason=reason, seconds=time.monotonic() - start)
         return LiveResult(ans, steps, urls)
 

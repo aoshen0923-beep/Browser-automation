@@ -78,6 +78,10 @@ label.file input { display: none; }
 .site .url { flex: 1; min-width: 160px; font-size: 13px; }
 .site button { padding: 4px 10px; font-size: 13px; }
 header { flex-wrap: wrap; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ctl:empty { display: none; }
+.paused { background: var(--code); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 12px;
+  margin-bottom: 10px; }
 .captcha { background: var(--skip-bg); color: var(--skip); border-radius: 8px; padding: 8px 12px;
   font-weight: 600; margin-bottom: 10px; }
 @media (max-width: 600px) { .big { font-size: 24px; } }
@@ -291,6 +295,8 @@ function track(id) {
   if (cards.has(id)) return;
   const el = document.createElement("div");
   el.className = "panel job";
+  el.dataset.id = id;
+  el.innerHTML = `<div class="body"></div><div class="ctl"></div>`;
   $("jobs").prepend(el);
   cards.set(id, el);
   running.add(id);
@@ -324,13 +330,16 @@ async function refresh(id) {
     : `完成 · 用时 ${j.elapsed}s`;
   // Show a banner while the agent waits for a CAPTCHA to be solved in Chrome.
   const lastWait = j.log.findLastIndex((l) => l.includes("需要人机验证"));
-  const lastEnd = j.log.findLastIndex((l) => l.includes("验证已通过") || l.includes("等待验证超时"));
+  const lastEnd = j.log.findLastIndex((l) => l.includes("验证已通过") || l.includes("等待验证超时") || l.includes("已暂停") || l.includes("继续："));
   const waiting = j.status === "running" && lastWait > lastEnd;
   if (waiting && !el.dataset.beeped) { el.dataset.beeped = "1"; beep(); notifyCaptcha(j); }
   if (!waiting) delete el.dataset.beeped;
   waitingJobs[waiting ? "add" : "delete"](id);
   updateTitle();
-  el.innerHTML = `${waiting ? `<div class="captcha">需要人机验证：请切换到 Chrome 窗口完成验证，完成后会自动继续。</div>` : ""}
+  el.querySelector(".body").innerHTML = `${j.paused ? `<div class="paused"><b>已暂停，轮到你操作。</b>
+      请切换到浏览器窗口：等页面加载完、翻到有答案的地方、或者自己换个检索词都可以。
+      好了回来点「继续作答」，AI 会从你当前看的页面接着找；也可以直接点「停止，马上作答」。</div>` : ""}
+    ${waiting ? `<div class="captcha">需要人机验证：请切换到 Chrome 窗口完成验证，完成后会自动继续。</div>` : ""}
     <div class="stem">#${j.id} ${esc(j.stem)}</div>
     <div class="muted">${kind} · ${j.round === "team" ? "团队赛" : "个人赛"} · ${head}</div>
     ${j.error ? `<div class="err" style="margin-top:6px">${esc(j.error)}</div>` : ""}
@@ -339,8 +348,36 @@ async function refresh(id) {
     ${j.log.length ? `<div class="section"><h3>浏览器操作步骤</h3><pre class="log">${esc(j.log.join("\n"))}</pre></div>` : ""}`;
   const log = el.querySelector(".log");
   if (log) log.scrollTop = log.scrollHeight;
+  // The buttons are only redrawn when they change, so a click is never lost to a refresh.
+  let ctl = "";
+  if (j.controls && j.paused) {
+    ctl = `<button class="primary" data-act="resume">继续作答</button>
+           <button data-act="stop">停止，马上作答</button>`;
+  } else if (j.controls) {
+    ctl = `<button data-act="pause" title="AI 暂停，你自己在浏览器里操作，好了再让它接着找">我来操作</button>
+           <button data-act="stop" title="不再查找，用已经看到的内容立刻给出答案">停止，马上作答</button>`;
+  } else if (j.can_continue) {
+    ctl = `<button data-act="more" title="从浏览器当前页面接着找">继续查找（再查 ${Math.round(j.budget)} 秒）</button>`;
+  }
+  const box = el.querySelector(".ctl");
+  if (box.dataset.html !== ctl) { box.innerHTML = ctl; box.dataset.html = ctl; }
   if (j.status === "done") running.delete(id);
 }
+
+$("jobs").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const id = Number(b.closest(".job").dataset.id);
+  b.disabled = true;
+  try {
+    await api(`/api/jobs/${id}/${b.dataset.act}`, {});
+    running.add(id);
+    refresh(id);
+  } catch (err) {
+    alert("操作失败：" + err.message);
+    b.disabled = false;
+  }
+});
 
 // --- tabs ---------------------------------------------------------------------
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));

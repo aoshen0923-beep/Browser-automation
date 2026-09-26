@@ -194,3 +194,73 @@ def test_knowledge_base_tab_end_to_end(std_site, chrome, tmp_path):  # noqa: F81
         assert merged == {"added": 1, "updated": 0, "kept": 0}
         app.loop.call_soon_threadsafe(app.loop.stop)
         t.join(10)
+
+
+def test_take_over_stop_and_continue_buttons(std_site, chrome, tmp_path):  # noqa: F811
+    from playwright.sync_api import sync_playwright
+
+    from test_browser import _chromium
+
+    class Wanderer:
+        def __init__(self):
+            self.prompts = []
+
+        def chat_json(self, system, user, max_tokens=700):
+            if "网站目录" not in system:
+                return {"answer": "A", "confidence": 0.3}
+            self.prompts.append(user)
+            if "时间到了" in user:
+                return {"action": "answer", "answer": "b", "confidence": 0.4}
+            if "空白页" in user:
+                return {"action": "goto", "url": std_site + "/results.html"}
+            time.sleep(0.2)
+            return {"action": "find", "text": "nothing"}
+
+    model = Wanderer()
+    cfg = Config(root=tmp_path)
+    cfg.browser.cdp_url = chrome
+    with KB(":memory:") as kb:
+        app = App(cfg, kb, model, [])
+        t = threading.Thread(target=app.serve, kwargs={"port": 0, "open_browser": False}, daemon=True)
+        t.start()
+        while not app.url:
+            time.sleep(0.1)
+        with sync_playwright() as p:
+            viewer = p.chromium.launch(executable_path=_chromium(), args=["--no-sandbox"])
+            page = viewer.new_page()
+            page.goto(app.url)
+            page.fill("#q", QUESTION)
+            page.fill("#budget", "300")
+            page.click("#go")
+            page.click("button[data-act=pause]", timeout=15000)  # 我来操作
+            page.wait_for_selector(".paused", timeout=10000)
+            job = call(app.url.rstrip("/") + "/api/jobs/1")
+            assert job["paused"] and job["controls"]
+            steps_while_paused = len(model.prompts)
+            time.sleep(1.5)
+            assert len(model.prompts) == steps_while_paused  # really paused
+            page.click("button[data-act=resume]")  # 继续作答
+            page.wait_for_selector("button[data-act=pause]", timeout=10000)
+            page.click("button[data-act=stop]")  # 停止，马上作答
+            page.wait_for_selector("button[data-act=more]", timeout=15000)
+            job = call(app.url.rstrip("/") + "/api/jobs/1")
+            assert job["status"] == "done" and job["final"]["answer"] == "B"
+            assert any("继续：" in line for line in job["log"])
+            page.click("button[data-act=more]")  # 继续查找
+            page.click("button[data-act=stop]", timeout=10000)
+            for _ in range(100):
+                job = call(app.url.rstrip("/") + "/api/jobs/1")
+                if job["status"] == "done":
+                    break
+                time.sleep(0.2)
+            assert job["status"] == "done" and any("继续查找" in line for line in job["log"])
+            assert "上一轮时间到时给出的答案是 B" in model.prompts[-1]
+            viewer.close()
+        # Buttons for a finished job are refused politely.
+        try:
+            call(app.url.rstrip("/") + "/api/jobs/1/pause", {})
+            raise AssertionError("pause accepted on a finished job")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+        app.loop.call_soon_threadsafe(app.loop.stop)
+        t.join(10)

@@ -171,8 +171,19 @@ and watch:
 2. each step of the live research in Chrome,
 3. the final answer with confidence, answer/skip advice and source links.
 
-Several questions can run at once, which suits the team round. From a
-terminal the same page is `quizpilot ui`.
+While it researches, each question has buttons:
+
+- **我来操作** pauses the agent (even mid-way through a slow page) so you
+  can use the browser yourself: wait for a page, open the right record,
+  try another keyword. **继续作答** hands back; the agent carries on from
+  the tab you left in front and reads that page first.
+- **停止，马上作答** stops searching and answers from what it has seen.
+- **继续查找** (after it finishes) researches for another round from the
+  current page, remembering what it already found.
+
+Time spent paused or on a verification page doesn't count against the
+time limit. Several questions can run at once, which suits the team round.
+From a terminal the same page is `quizpilot ui`.
 
 The **网站登录** tab lists the contest sites (grouped like the bookmarks
 folder), marking the ones that need an account. Click 打开登录 to open a
@@ -234,7 +245,7 @@ options, finds text on long pages and reads PDFs page by page. You can
 watch it work in the browser window.
 
 ```powershell
-quizpilot ask --live --round team            # up to 75 s per question
+quizpilot ask --live --round team            # up to 120 s per question
 quizpilot ask --live --budget 40             # custom time limit
 quizpilot eval practice.txt --live --modules 11,12,24 --budget 60
 ```

@@ -23,7 +23,7 @@ from . import __version__
 from .question import Question, parse_question
 from .solver import ROUNDS, Answer, break_even, solve, worth_answering
 
-LIVE_BUDGET = {"individual": 25, "team": 75}
+LIVE_BUDGET = {"individual": 30, "team": 120}
 
 
 def answer_dict(q: Question, ans: Answer, round_name: str, urls: list[str] | None = None) -> dict:
@@ -57,6 +57,16 @@ class Job:
     error: str = ""
     started: float = field(default_factory=time.time)
     finished: float | None = None
+    control: object = None  # agent.Control while live research can be paused/stopped
+    agent: object = None  # kept after research so 继续查找 can pick up where it stopped
+
+    @property
+    def paused(self) -> bool:
+        return self.status == "running" and self.control is not None and self.control.paused
+
+    @property
+    def can_continue(self) -> bool:
+        return self.status == "done" and self.agent is not None and getattr(self.agent, "page", None) is not None
 
     def summary(self) -> dict:
         best = self.final or self.quick or {}
@@ -80,6 +90,10 @@ class Job:
             "final": self.final,
             "error": self.error,
             "elapsed": round((self.finished or time.time()) - self.started, 1),
+            "budget": self.budget,
+            "controls": self.status == "running" and self.control is not None,
+            "paused": self.paused,
+            "can_continue": self.can_continue,
         }
 
 
@@ -110,16 +124,54 @@ class App:
             next(self._ids), raw, q, round_name, live and self.live_available,
             budget or LIVE_BUDGET[round_name],
         )
+        if job.live:
+            from .agent import Control
+
+            job.control = Control()
         self.jobs[job.id] = job
         asyncio.run_coroutine_threadsafe(self._run(job), self.loop)
         return job
+
+    def job_action(self, job: Job, action: str) -> None:
+        """我来操作 (pause) / 继续作答 (resume) / 停止 (stop) / 继续查找 (more)."""
+        if action == "more":
+            if not job.can_continue:
+                raise ValueError("这道题没有可以接着查的浏览器页面")
+            from .agent import Control
+
+            job.control = job.agent.control = Control()
+            job.status, job.phase, job.finished = "running", "继续在浏览器中查找…", None
+            asyncio.run_coroutine_threadsafe(self._more(job), self.loop)
+            return
+        if job.status != "running" or job.control is None:
+            raise ValueError("这道题已经答完了")
+        method = {"pause": job.control.pause, "resume": job.control.resume, "stop": job.control.request_stop}[action]
+        self.loop.call_soon_threadsafe(method)
+        if action == "pause":
+            job.phase = "已暂停，等你操作浏览器"
+        elif action == "resume":
+            job.phase = "在浏览器中查找…"
+        else:
+            job.phase = "正在用已找到的内容作答…"
+
+    async def _more(self, job: Job) -> None:
+        try:
+            result = await job.agent.run(job.q, budget=job.budget, resume=True)
+            job.final = answer_dict(job.q, result.answer, job.round, result.urls)
+        except Exception as e:
+            job.error = f"{type(e).__name__}: {e}"
+        finally:
+            job.status = "done"
+            job.phase = "完成"
+            job.finished = time.time()
 
     async def _run(self, job: Job) -> None:
         try:
             ans = await asyncio.to_thread(solve, job.q, self.kb, self.model, self.cfg.solver.top_k)
             job.quick = answer_dict(job.q, ans, job.round)
-            if job.live:
-                job.phase = "在 Chrome 中查找…"
+            if job.live and not job.control.stop:
+                if not job.paused:
+                    job.phase = "在浏览器中查找…"
                 await self._live(job)
         except Exception as e:  # report on the page, never kill the server
             job.error = f"{type(e).__name__}: {e}"
@@ -136,8 +188,9 @@ class App:
         except Exception as e:
             job.log.append(f"Chrome 未连接：{e}")
             return
-        agent = Agent(browser, self.model, self.sites, self.kb, log=job.log.append, logged_in=self.logins.logged_in_sites(),
-                      vision=self.cfg.llm.vision != "off")
+        agent = job.agent = Agent(browser, self.model, self.sites, self.kb, log=job.log.append,
+                                  logged_in=self.logins.logged_in_sites(), vision=self.cfg.llm.vision != "off",
+                                  control=job.control)
         result = await agent.run(job.q, budget=job.budget)
         job.final = answer_dict(job.q, result.answer, job.round, result.urls)
 
@@ -350,6 +403,20 @@ class App:
                     return self._logins(self.path.rsplit("/", 1)[-1])
                 if self.path.startswith("/api/flows/"):
                     return self._flows(self.path.rsplit("/", 1)[-1])
+                if self.path.startswith("/api/jobs/"):
+                    parts = self.path.strip("/").split("/")  # api/jobs/<id>/<action>
+                    try:
+                        job = app.jobs[int(parts[2])]
+                        action = parts[3]
+                    except (ValueError, KeyError, IndexError):
+                        return self._json({"error": "not found"}, 404)
+                    if action not in ("pause", "resume", "stop", "more"):
+                        return self._json({"error": "not found"}, 404)
+                    try:
+                        app.job_action(job, action)
+                    except Exception as e:
+                        return self._json({"error": str(e)}, 400)
+                    return self._json(job.full())
                 if self.path.startswith("/api/kb/"):
                     return self._kb(self.path.rsplit("/", 1)[-1])
                 if self.path != "/api/ask":

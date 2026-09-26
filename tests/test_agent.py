@@ -367,3 +367,173 @@ def test_answers_from_question_bank_sites_are_capped():
     assert unreliable("https://zhidao.baidu.com/question/1.html")
     assert not unreliable("https://openstd.samr.gov.cn/bzgk/gb/newGbInfo?hcno=1")
     assert not unreliable("")
+
+
+@pytest.fixture
+def slow_site(tmp_path):
+    """Pages whose content arrives late, a page that never finishes, a long detail page."""
+    import time as _time
+
+    (tmp_path / "late.html").write_text(
+        '<meta charset="utf-8"><title>检索结果</title><div id="r">正在加载…</div>'
+        "<script>fetch('slow?3').then(r => r.text()).then(t => { document.getElementById('r').innerText ="
+        " '迟到的内容：本标准主要起草人：高尚荣、李桂梅、李建全。' + '其他说明'.repeat(60); })</script>",
+        encoding="utf-8",
+    )
+    (tmp_path / "detail.html").write_text(
+        '<meta charset="utf-8"><title>标准详情</title><p>' + "目录与前言内容。" * 900 + "</p>"
+        "<p>本标准主要起草人：高尚荣、李桂梅、李建全</p>",
+        encoding="utf-8",
+    )
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=str(tmp_path), **kw)
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path.startswith("/slow") or self.path.startswith("/hang"):
+                _time.sleep(float(self.path.split("?")[1]) if "?" in self.path else 30)
+                body = b"ok"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def test_waits_for_slow_results_and_reads_past_the_first_screen(slow_site, chrome):  # noqa: F811
+    class Model:
+        def __init__(self):
+            self.prompts = []
+
+        def chat_json(self, system, user, max_tokens=700):
+            self.prompts.append(user)
+            if "空白页" in user:
+                return {"action": "goto", "url": slow_site + "/late.html"}
+            if "迟到的内容" in user and "标准详情" not in user and "页面第" not in user:
+                return {"action": "goto", "url": slow_site + "/detail.html"}
+            if "主要起草人" in user and "页面第" in user:
+                return {"action": "answer", "answer": "C", "confidence": 0.9}
+            if "read（from=" in user:
+                return {"action": "read", "from": 5000}
+            return {"action": "find", "text": "nothing"}
+
+    model = Model()
+    logs = []
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, model, [], None, log=logs.append)
+            return await agent.run(parse_question(QUESTION, "single"), budget=90, close=True)
+
+    result = asyncio.run(run())
+    # The results that load 3 s after the page were waited for, not missed.
+    assert "迟到的内容" in model.prompts[1], model.prompts[1][-400:]
+    assert any("加载较慢" in line for line in logs)
+    # The answer sat past the first 5000 characters; the agent read on.
+    assert [s.action["action"] for s in result.steps] == ["goto", "goto", "read"], [s.result[:80] for s in result.steps]
+    assert result.answer.answer == "C"
+
+
+def test_take_over_then_continue_from_the_users_page(slow_site, chrome):  # noqa: F811
+    from quizpilot.agent import Control
+
+    class Model:
+        def __init__(self):
+            self.prompts = []
+
+        def chat_json(self, system, user, max_tokens=700):
+            self.prompts.append(user)
+            if "空白页" in user:
+                return {"action": "goto", "url": slow_site + "/hang"}  # a page that never finishes loading
+            if "用户手动操作" in user and "主要起草人" in user:
+                return {"action": "answer", "answer": "C", "confidence": 0.95}
+            if "用户手动操作" in user:
+                return {"action": "read", "from": 5000}
+            return {"action": "find", "text": "nothing"}
+
+    model = Model()
+    logs = []
+    control = Control()
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, model, [], None, log=logs.append, control=control)
+            task = asyncio.create_task(agent.run(parse_question(QUESTION, "single"), budget=300, close=True))
+            while not any("goto" in line for line in logs):
+                await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
+            t0 = asyncio.get_running_loop().time()
+            control.pause()  # 我来操作, while the page is still loading
+            while not any("已暂停" in line for line in logs):
+                await asyncio.sleep(0.1)
+            assert asyncio.get_running_loop().time() - t0 < 3  # the stuck page didn't hold it up
+            # The person opens the right page in a new tab themselves.
+            page = await browser.context.new_page()
+            await page.goto(slow_site + "/detail.html")
+            await page.bring_to_front()
+            await asyncio.sleep(0.5)
+            assert not task.done()
+            control.resume()  # 继续作答
+            t1 = asyncio.get_running_loop().time()
+            result = await asyncio.wait_for(task, 30)
+            assert asyncio.get_running_loop().time() - t1 < 8  # didn't wait for the stuck tab
+            return result
+
+    result = asyncio.run(run())
+    assert result.answer.answer == "C"
+    assert any("继续：" in line and "detail.html" in line for line in logs), logs
+    kinds = [s.action["action"] for s in result.steps]
+    assert kinds[:3] == ["goto", "用户手动操作", "read"], kinds
+    assert result.steps[0].result == "被用户打断"
+
+
+def test_stop_answers_at_once_and_continue_resumes(std_site, chrome):  # noqa: F811
+    from quizpilot.agent import Control
+
+    class Wanderer:
+        def __init__(self):
+            self.prompts = []
+
+        def chat_json(self, system, user, max_tokens=700):
+            self.prompts.append(user)
+            if "时间到了" in user:
+                return {"action": "answer", "answer": "b", "confidence": 0.3}
+            if "空白页" in user:
+                return {"action": "goto", "url": std_site + "/results.html"}
+            return {"action": "find", "text": "nothing"}
+
+    model = Wanderer()
+    logs = []
+    control = Control()
+
+    async def run():
+        async with Browser(chrome) as browser:
+            agent = Agent(browser, model, [], None, log=logs.append, control=control)
+            task = asyncio.create_task(agent.run(parse_question(QUESTION, "single"), budget=600))
+            while len(model.prompts) < 3:
+                await asyncio.sleep(0.05)
+            control.request_stop()  # 停止，马上作答
+            first = await asyncio.wait_for(task, 10)
+            # 继续查找: picks up on the same page, remembering the last answer.
+            agent.control = Control()
+            agent.control.request_stop()
+            second = await asyncio.wait_for(agent.run(parse_question(QUESTION, "single"), budget=60, resume=True), 10)
+            return first, second
+
+    first, second = asyncio.run(run())
+    assert first.answer.answer == "B" and any("停止查找" in line for line in logs)
+    assert any("继续查找" in line for line in logs)
+    assert "上一轮时间到时给出的答案是 B" in model.prompts[-1]
+    assert "results.html" in model.prompts[-1]
+    assert second.steps[0].action["action"] == "goto"  # earlier steps are kept
